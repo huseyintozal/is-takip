@@ -191,7 +191,14 @@ function tasimaKarti() {
   const isle = async ([d]) => {
     if (!d) return;
     try {
-      const veri = JSON.parse(await d.text());
+      const metin = (await d.text()).replace(/^\uFEFF/, '').trim();
+      let veri;
+      try { veri = JSON.parse(metin); }
+      catch (x) {
+        const bas = metin.slice(0, 40).replace(/\s+/g, ' ');
+        throw new Error(`"${d.name}" okunamadı (${Math.round(d.size / 1024)} KB). Dosyanın başı: "${bas}". ` +
+          (/^PK/.test(metin) ? 'Bu bir zip/Excel dosyası; isler.json seçin.' : 'isler.json dosyasını seçtiğinizden emin olun.'));
+      }
       const gelen = (Array.isArray(veri) ? veri : veri.isler || []).filter(i => i && i.id && i.isveren);
       if (!gelen.length) throw new Error('Dosyada iş bulunamadı');
       const uzerine = $('#tasiUzerine').checked;
@@ -207,7 +214,7 @@ function tasimaKarti() {
         <b>${yeni.length}</b> iş buluta ${uzerine ? 'yazıldı' : 'eklendi'}${gelen.length - yeni.length ? `, ${gelen.length - yeni.length} iş zaten vardı` : ''}. <a href="#/isler">İşlere git</a></div></div>`;
       ikonlariDoldur($('#tasiSonuc'));
       bildir('Veriler taşındı');
-    } catch (e) { hataGoster(e instanceof SyntaxError ? new Error('Dosya okunamadı, isler.json seçtiğinizden emin olun') : e); }
+    } catch (e) { hataGoster(e); }
   };
   const b = $('#tasiBirak');
   birakmaAlani(b, isle);
