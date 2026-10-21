@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>İş Takibi — Zemin Etüt</title>
+<meta name="theme-color" content="#0f1b2a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="İş Takibi">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="ikon-180.png">
+<link rel="icon" href="ikon-192.png">
+<link rel="stylesheet" href="stil.css">
+<link rel="stylesheet" href="is_takip.css">
+<link rel="stylesheet" href="web.css">
+</head>
+<body class="girisli-degil">
+<header class="mobil-ust">
+  <button class="mobil-dugme" id="menuAc" aria-label="Menü"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <div class="mobil-ad">İş Takibi</div>
+  <button class="mobil-dugme" data-is-ara="1" aria-label="İş ara"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg></button>
+</header>
+<div class="uygulama">
+  <aside class="kenar">
+    <div class="marka">
+      <div class="marka-ikon"><svg viewBox="0 0 32 32"><path d="M6 22h20M6 16h20M6 10h20" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg></div>
+      <div><div class="marka-ad">Zemin Etüt</div><div class="marka-alt">İş Takibi</div></div>
+    </div>
+    <nav class="menu">
+      <a href="#/isler" data-sayfa="isler"><i data-i="liste"></i>İşler</a>
+      <a href="#" data-is-ara="1"><i data-i="ara"></i>İş ara<span class="kisayol">Ctrl+K</span></a>
+      <a href="#/isler/rapor" data-sayfa="isler/rapor"><i data-i="mesaj"></i>İşveren raporu</a>
+      <a href="#/isler/aktar" data-sayfa="isler/aktar"><i data-i="yukle"></i>Excel aktar</a>
+      <a href="#/kullanicilar" data-sayfa="kullanicilar" data-yonetici="1" style="display:none"><i data-i="musteri"></i>Kullanıcılar</a>
+      <a href="#/hesap" data-sayfa="hesap"><i data-i="kisi"></i>Hesabım</a>
+    </nav>
+    <div class="kenar-alt" id="kenarFirma"></div>
+  </aside>
+  <main class="icerik" id="icerik"></main>
+</div>
+<div class="menu-perde" id="menuPerde"></div>
+<div class="giris" id="giris"></div>
+
+<div class="bildirimler" id="bildirimler"></div>
+<div class="perde gizli" id="perde"></div>
+
+<script src="vendor/supabase.js"></script>
+<script src="ayar.js"></script>
+<script src="ortak_web.js"></script>
+<script src="is_takip_veri.js"></script>
+<script src="xlsx.js"></script>
+<script src="is_takip.js"></script>
+<script src="bulut.js"></script>
+</body>
+</html>

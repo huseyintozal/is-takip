@@ -1,0 +1,78 @@
+/* İş Takibi — bulut sürümüne özel: giriş ekranı, kullanıcılar, telefon görünümü. Yalnızca stil.css değişkenleri. */
+body { -webkit-tap-highlight-color: transparent; }
+
+/* giriş */
+.giris { display: none; }
+body.girisli-degil .giris { display: grid; place-items: center; min-height: 100vh; min-height: 100dvh; padding: 24px 16px; background: var(--zemin); }
+body.girisli-degil .uygulama, body.girisli-degil .mobil-ust { display: none !important; }
+.giris-kart { width: min(400px, 100%); background: var(--yuzey); border: 1px solid var(--cizgi); border-radius: 14px; box-shadow: var(--golge2); padding: 26px 24px; }
+.giris-kart h1 { font-size: 20px; margin: 0 0 16px; font-weight: 650; }
+.giris-marka { padding: 0 0 20px; }
+.giris-marka .marka-ad { color: var(--metin); }
+.giris-marka .marka-alt { color: var(--soluk); }
+.giris-alt { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; font-size: 13.5px; }
+.giris-p { color: var(--metin2); line-height: 1.55; margin: 0 0 12px; }
+.giris-eposta { background: var(--cizgi2); border-radius: 8px; padding: 10px 12px; font-weight: 600; word-break: break-all; }
+
+/* kullanıcılar */
+.kul-form { display: grid; grid-template-columns: 2fr 1.4fr 1fr auto; gap: 10px; }
+.kul-liste li { padding: 10px 18px; }
+.kul-liste .dosya-ikon i { width: 16px; height: 16px; }
+
+/* telefon üst çubuğu ve açılır menü */
+.mobil-ust { display: none; }
+.menu-perde { display: none; }
+@media (max-width: 900px) {
+  .mobil-ust { display: flex; align-items: center; gap: 8px; position: sticky; top: 0; z-index: 30; background: #0f1b2a; color: #fff;
+    padding: calc(env(safe-area-inset-top) + 8px) 10px 8px; }
+  .mobil-ad { flex: 1; font-weight: 650; font-size: 16px; text-align: center; }
+  .mobil-dugme { width: 40px; height: 40px; border: none; background: transparent; color: #fff; border-radius: 10px; display: grid; place-items: center; }
+  .mobil-dugme:active { background: rgba(255,255,255,.1); }
+  .mobil-dugme svg { width: 22px; height: 22px; }
+  .uygulama { height: calc(100dvh - 56px - env(safe-area-inset-top)); }
+  .kenar { display: flex; position: fixed; z-index: 55; top: 0; bottom: 0; left: 0; width: 264px; transform: translateX(-105%); transition: transform .2s ease;
+    padding-top: calc(env(safe-area-inset-top) + 18px); padding-bottom: calc(env(safe-area-inset-bottom) + 12px); }
+  body.menu-acik .kenar { transform: none; box-shadow: var(--golge2); }
+  body.menu-acik .menu-perde { display: block; position: fixed; inset: 0; z-index: 54; background: rgba(15,23,42,.45); }
+  .menu a { padding: 12px 11px; }
+  .menu a .kisayol { display: none; }
+  .sayfa { padding: 16px 12px calc(env(safe-area-inset-bottom) + 60px); }
+  .girdi, select.girdi, textarea.girdi { font-size: 16px; }          /* iPhone'da yazarken sayfa büyümesin */
+  .ust { flex-wrap: wrap; }
+  .ust h1 { font-size: 20px; }
+  .ust .bosluk { flex-basis: 100%; height: 0; }
+  .ozet-kutular { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .ozet-kutu { padding: 10px 12px; }
+  .ozet-kutu .simge { width: 32px; height: 32px; }
+  .ozet-kutu .sayi { font-size: 19px; }
+  .suzgec-satiri.yapiskan { position: static; }
+  .suzgec-satiri .girdi { flex: 1 1 140px; }
+  .adimlar { overflow-x: auto; }
+  .adim { min-width: 140px; }
+  .is-duzen .yan { position: static; }
+  .hucre-menu { width: min(370px, calc(100vw - 16px)); }
+  .kul-form { grid-template-columns: 1fr; }
+  .bildirimler { left: 12px; right: 12px; top: calc(env(safe-area-inset-top) + 64px); }
+  .bildirim { max-width: none; }
+  .pencere.ara-pencere { margin-top: calc(env(safe-area-inset-top) + 8px); }
+  .ara-sonuc { max-height: 60dvh; }
+  .rapor-bolum .kart-bas { flex-wrap: wrap; }
+}
+
+/* telefonda iş tablosu kart gibi görünür */
+@media (max-width: 700px) {
+  #tablo table.isler thead { display: none; }
+  #tablo table.isler, #tablo table.isler tbody { display: block; }
+  #tablo table.isler tr { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 4px; padding: 12px 14px; border-bottom: 1px solid var(--cizgi2); }
+  #tablo table.isler td { display: block; border: none; padding: 0; }
+  /* 1. satır: mal sahibi + ada/parsel, 2: işveren, 3: dokuz durum düğmesi, 4: aşama */
+  #tablo table.isler td.h-ms { order: 0; flex: 0 0 calc(100% - 104px); min-width: 0; }
+  #tablo table.isler td.h-ap { order: 1; flex: 0 0 96px; text-align: right; font-weight: 600; color: var(--metin2); white-space: normal !important; }
+  #tablo table.isler td.h-isv { order: 2; flex: 1 1 100%; margin-top: -4px; color: var(--soluk); }
+  #tablo table.isler td.o { order: 3; flex: 0 0 auto; width: auto; text-align: center; }
+  #tablo table.isler td.h-durum { order: 4; }
+  #tablo table.isler td.o::before { content: attr(data-k); display: block; font-size: 9.5px; color: var(--soluk); margin-bottom: 2px; letter-spacing: -.1px; }
+  #tablo table.isler td.h-durum { flex: 1 1 100%; }
+  #tablo table.isler .dd { width: 32px; height: 30px; }
+  #tablo table.isler tr:hover td { background: none; }
+}
