@@ -21,7 +21,7 @@ const KATEGORI_AD = Object.fromEntries(KATEGORI.map(k => [k[0], k[1]]));
 const YARDIMCI = 'http://127.0.0.1:8767';
 const BULUT_SINIR = 1024 * 1024 * 1024;        // ücretsiz plan: 1 GB
 const DOSYA_SINIR = 50 * 1024 * 1024;           // ücretsiz plan: dosya başına 50 MB
-const DOSYA = { satirlar: new Map(), yardimci: null, yardimciZaman: 0, kanal: null, eksikSayi: 0, kullanim: null };
+const DOSYA = { satirlar: new Map(), yardimci: null, yardimciZaman: 0, kanal: null, eksikSayi: 0, kullanim: null, dogrulandi: new Map(), kayip: new Set(), isaretlendi: false };
 
 const boyutYaz = b => !b ? '0 KB' : b >= 1024 ** 3 ? (b / 1024 ** 3).toFixed(2) + ' GB' : b >= 1024 ** 2 ? (b / 1024 ** 2).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
 const uzantiAl = ad => ((ad.match(/\.([A-Za-z0-9]{1,8})$/) || [])[1] || '').toLowerCase();
@@ -48,6 +48,7 @@ async function yardimciDenetle(zorla = false) {
   DOSYA.yardimciZaman = Date.now();
   try { DOSYA.yardimci = await yardimci('/durum', { sure: 2500 }); }
   catch (e) { DOSYA.yardimci = null; }
+  if (DOSYA.yardimci && DOSYA.yardimci.kok && !DOSYA.isaretlendi) { DOSYA.isaretlendi = true; setTimeout(hepsiniIsaretle, 2000); }
   return DOSYA.yardimci;
 }
 const yardimciHazir = () => !!(DOSYA.yardimci && DOSYA.yardimci.kok);
@@ -95,9 +96,83 @@ function klasorAdiUret(i) {
   return [buyuk(i.isveren), mah ? mah + ' MAH' : '', buyuk(i.mal_sahibi), ap]
     .filter(Boolean).join(' ').replace(/[<>:"/\\|?*]/g, '_').trim() || ('IS ' + i.id);
 }
+// ------------------------------------------------------------------ klasör takibi
+// Her bağlı klasöre Dosya Yardımcısı gizli bir ".istakip" işareti koyar. Klasör taşınırsa işaretinden bulunur ve
+// işin klasör yolu kendiliğinden düzeltilir. Bu bilgisayarda daha önce görülmüş bir klasör hiçbir yerde yoksa "kayıp" sayılır.
+const gorulenler = () => { try { return new Set(JSON.parse(localStorage.getItem('isTakip.gorulenKlasor') || '[]')); } catch (e) { return new Set(); } };
+function gorulduYaz(idler) {
+  const g = gorulenler(); idler.forEach(x => g.add(x));
+  try { localStorage.setItem('isTakip.gorulenKlasor', JSON.stringify([...g])); } catch (e) { /* */ }
+}
+async function hepsiniIsaretle(deneme = 0) {
+  if (!BULUT.isler || !BULUT.isler.size) { if (deneme < 10) setTimeout(() => hepsiniIsaretle(deneme + 1), 3000); return; }
+  const liste = [...BULUT.isler.values()].filter(i => i.klasor).map(i => ({ klasor: i.klasor, is_id: i.id }));
+  if (!liste.length) return;
+  try { gorulduYaz((await yardimci('/isaretle', { json: { liste }, sure: 60000 })).var || []); } catch (e) { /* eski yardımcı */ }
+}
+/* İşin klasörü yerinde mi? Taşındıysa bulup işe kaydeder. Döner: güncel klasör ('' = yok) */
+async function klasorDogrula(i, zorla = false) {
+  const guncel = BULUT.isler.get(i.id) || i;
+  if (!guncel.klasor || !yardimciHazir()) return guncel.klasor || '';
+  const once = DOSYA.dogrulandi.get(guncel.id);
+  if (!zorla && once && once.klasor === guncel.klasor && Date.now() - once.zaman < 60000) return DOSYA.kayip.has(guncel.id) ? '' : guncel.klasor;
+  let r;
+  try { r = await yardimci('/bul', { json: { is_id: guncel.id, klasor: guncel.klasor }, sure: 60000 }); }
+  catch (e) { return guncel.klasor; }                 // eski yardımcı: eskisi gibi devam
+  let klasor = guncel.klasor;
+  DOSYA.kayip.delete(guncel.id);
+  if (r.durum === 'tasindi' && r.klasor) {
+    klasor = r.klasor;
+    await api('PUT', `is_takip/isler/${encodeURIComponent(guncel.id)}`, { klasor });
+    bildir(`Klasör taşınmış, yeni yeri bulundu: ${klasor}`);
+    gorulduYaz([guncel.id]);
+  } else if (r.durum === 'yerinde') gorulduYaz([guncel.id]);
+  else if (r.durum === 'yok' && gorulenler().has(guncel.id)) { DOSYA.kayip.add(guncel.id); klasor = ''; }
+  DOSYA.dogrulandi.set(guncel.id, { klasor, zaman: Date.now() });
+  return klasor;
+}
+/* Klasördeki (listede olmayan) dosyaları işin dosya listesine ekler */
+async function klasorDosyalariniEkle(isId, klasor, bulut = false) {
+  const { dosyalar } = await yardimci(`/liste?klasor=${encodeURIComponent(klasor)}`);
+  const var_ = new Set(isDosyalari(isId).map(d => d.ad));
+  let dosya = 0, bulutta = 0;
+  for (const f of dosyalar.filter(f => !var_.has(f.ad))) {
+    let yol = null;
+    if (bulut) {
+      try {
+        const r = await yardimci(`/oku?klasor=${encodeURIComponent(klasor)}&ad=${encodeURIComponent(f.ad)}`, { ham: true, sure: 120000 });
+        const b = await bulutaKoy(isId, await r.blob(), f.ad); if (b.yol) { yol = b.yol; bulutta++; }
+      } catch (e) { /* bilgisayarda kalır */ }
+    }
+    const { data, error } = await BULUT.sb.from('dosyalar').insert({ is_id: isId, kategori: kategoriTahmin(f.ad), ad: f.ad, boyut: f.boyut,
+      tur: '', bulut_yolu: yol, pc: buCihaz(), ekleyen: BULUT.eposta }).select().single();
+    if (error) throw sbHata(error);
+    DOSYA.satirlar.set(data.id, data); dosya++;
+  }
+  return { dosya, bulutta };
+}
+/* İş sayfasından: bilgisayardaki herhangi bir klasörü bu işe bağla */
+async function klasorDegistir(isId) {
+  const i = BULUT.isler.get(isId); if (!i) return;
+  let r;
+  try { r = await yardimci('/klasor/sec', { json: { is_id: isId }, sure: 600000 }); }
+  catch (e) { return hataGoster(e.kod === 404 ? new Error('Dosya Yardımcısı eski sürüm. Dosyalar sayfasından dosya_yardimcisi.zip\'i indirip KUR.bat\'ı tekrar çalıştırın.') : e); }
+  if (!r.secildi) return;
+  try {
+    await api('PUT', `is_takip/isler/${encodeURIComponent(isId)}`, { klasor: r.klasor });
+    DOSYA.kayip.delete(isId); DOSYA.dogrulandi.set(isId, { klasor: r.klasor, zaman: Date.now() }); gorulduYaz([isId]);
+    const { dosya } = await klasorDosyalariniEkle(isId, r.klasor);
+    bildir(`Klasör bağlandı${dosya ? `, ${dosya} dosya listeye eklendi` : ''}`);
+  } catch (e) { hataGoster(e); }
+  dosyaKartiCiz(isId);
+}
 async function isKlasoru(i) {        // işin bilgisayardaki klasörü; yoksa adını üretip işe kaydeder
   const guncel = BULUT.isler.get(i.id) || i;
-  if (guncel.klasor) return guncel.klasor;
+  if (guncel.klasor) {
+    const k = await klasorDogrula(guncel);
+    if (!k) throw new Error('Bu işin klasörü bulunamadı (taşınmış ya da silinmiş). İş sayfasındaki "Klasörü değiştir" ile yeni yerini seçin.');
+    return k;
+  }
   const ana = (() => { try { return localStorage.getItem('isTakip.yeniKlasorYeri') || ''; } catch (e) { return ''; } })();
   const klasor = (ana ? ana.replace(/[\\/]+$/, '') + '/' : '') + klasorAdiUret(guncel);
   await api('PUT', `is_takip/isler/${encodeURIComponent(i.id)}`, { klasor });
@@ -154,6 +229,7 @@ async function dosyaEkle(isId, kategori, dosyalar) {
     DOSYA.satirlar.set(data.id, data); tamam++;
   }
   if (durum) durum.textContent = '';
+  if (pcde && klasor) yardimci('/isaretle', { json: { liste: [{ klasor, is_id: isId }] } }).then(r => gorulduYaz(r.var || [])).catch(() => {});
   dosyaKartiCiz(isId);
   if (uyarilar.length) bildir(uyarilar.join(' · '), 'hata');
   if (tamam) bildir(`${tamam} dosya eklendi${pcde ? ' (bilgisayara ve ' + (bulut ? 'buluta)' : 'yalnızca bilgisayara)') : ' (buluta)'}`);
@@ -174,7 +250,8 @@ async function dosyaAc(id) {
   const i = BULUT.isler.get(d.is_id) || {};
   await yardimciDenetle();
   if (yardimciHazir()) {                    // bilgisayarda: bilgisayardaki programla aç
-    let klasor = i.klasor;
+    let klasor = i.klasor ? await klasorDogrula(i) : '';
+    if (i.klasor && !klasor) { dosyaKartiCiz(i.id); return bildir('Bu işin klasörü bulunamadı (taşınmış ya da silinmiş). "Klasörü değiştir" ile yeni yerini seçin.', 'hata'); }
     if (klasor) {
       try { await yardimci('/ac', { json: { klasor, ad: d.ad } }); return; }
       catch (e) { if (e.kod !== 404) return hataGoster(e); }
@@ -241,6 +318,11 @@ function dosyaKartiCiz(isId) {
   const i = BULUT.isler.get(isId) || {};
   const liste = isDosyalari(isId);
   const yaz = !saltOkunur();
+  const kayip = DOSYA.kayip.has(isId);
+  if (yardimciHazir() && i.klasor && !DOSYA.dogrulandi.has(isId)) {        // taşınmış mı? (arka planda)
+    DOSYA.dogrulandi.set(isId, { klasor: i.klasor, zaman: 0 });
+    klasorDogrula(i, true).then(k => { if (k !== i.klasor) dosyaKartiCiz(isId); }).catch(() => {});
+  }
   const rozet = d => [
     d.bulut_yolu ? `<span class="etiket vurgu" title="Bulutta, her cihazdan açılır">${ikon('bulut')}Bulut</span>` : '',
     d.pc ? `<span class="etiket ${d.pc === buCihaz() ? 'yesil' : ''}" title="Bilgisayardaki proje klasöründe">${ikon('pc')}${d.pc === buCihaz() ? 'Bu bilgisayar' : esc(d.pc)}</span>` : '',
@@ -254,7 +336,10 @@ function dosyaKartiCiz(isId) {
       ${yaz ? `<button class="dugme kucuk hayalet tehlike" data-sil="${esc(d.id)}" title="Sil">${ikon('sil')}</button>` : ''}</li>`;
   kart.innerHTML = `<div class="kart-bas"><h2>Dosyalar</h2><span class="aciklama">${liste.length ? liste.length + ' dosya' : 'Dosyayı ilgili bölüme sürükleyin'}</span>
       <div style="flex:1"></div>
-      ${yardimciHazir() && i.klasor ? `<button class="dugme kucuk" id="klasorAc" title="${esc(i.klasor)}">${ikon('klasor')}Klasörü aç</button>` : ''}</div>
+      ${yardimciHazir() && i.klasor && !kayip ? `<button class="dugme kucuk" id="klasorAc" title="${esc(i.klasor)}">${ikon('klasor')}Klasörü aç</button>` : ''}
+      ${yardimciHazir() && yaz ? `<button class="dugme kucuk hayalet" id="klasorDegistir" title="Bilgisayardaki herhangi bir klasörü bu işe bağla">${i.klasor ? 'Klasörü değiştir' : 'Klasör seç'}</button>` : ''}</div>
+    ${kayip ? `<div class="kutu uyari" style="margin:0 0 10px">${ikon('uyari')}<div><b>Klasör bulunamadı.</b> <span class="kucuk-yazi">${esc(i.klasor)}</span><br>
+      Taşınmış ya da silinmiş, bilgisayarda da bulunamadı. <b>Klasörü değiştir</b> ile yeni yerini seçin.</div></div>` : ''}
     <div class="dosya-bilgi kucuk-yazi">${yardimciHazir()
       ? (i.klasor ? `${ikon('pc')} Klasör: <b>${esc(i.klasor)}</b>` : `${ikon('pc')} İlk dosyada bilgisayarda <b>${esc(klasorAdiUret(i))}</b> klasörü açılır`)
       : (/iPhone|iPad|Android/i.test(navigator.userAgent) ? `${ikon('bulut')} Dosyalar buluta yüklenir, her cihazdan açılır` : `${ikon('bilgi')} Bu bilgisayarda Dosya Yardımcısı yok; dosyalar yalnızca buluta yüklenir. <a href="#/dosyalar">Kur</a>`)}
@@ -270,7 +355,12 @@ function dosyaKartiCiz(isId) {
   $$('[data-ac]', kart).forEach(a => a.onclick = e => { e.preventDefault(); dosyaAc(a.dataset.ac); });
   $$('[data-sil]', kart).forEach(b => b.onclick = () => dosyaSil(b.dataset.sil));
   $$('[data-bulut]', kart).forEach(b => b.onclick = () => dosyaBulutaYukle(b.dataset.bulut));
-  if ($('#klasorAc', kart)) $('#klasorAc', kart).onclick = () => yardimci('/ac', { json: { klasor: i.klasor } }).catch(hataGoster);
+  if ($('#klasorAc', kart)) $('#klasorAc', kart).onclick = async () => {
+    const k = await klasorDogrula(i, true);
+    if (!k) return dosyaKartiCiz(isId);
+    yardimci('/ac', { json: { klasor: k } }).catch(hataGoster);
+  };
+  if ($('#klasorDegistir', kart)) $('#klasorDegistir', kart).onclick = () => klasorDegistir(isId);
   if (!yaz) return;
   $$('[data-ekle]', kart).forEach(b => b.onclick = async () => dosyaEkle(isId, b.dataset.ekle, await dosyaSec(true)));
   $$('.dosya-satir', kart).forEach(li => li.ondragstart = e => { e.dataTransfer.setData('text/is-dosya', li.dataset.dosya); });
@@ -343,7 +433,7 @@ async function dosyalarSayfasi() {
       <div class="kart-ic yigin">${y ? `
         <div class="sistem-satir" style="padding:0"><div class="durum-ikon ok">${ikon('tamam')}</div>
           <div style="flex:1"><b>Dosya Yardımcısı çalışıyor</b><div class="soluk kucuk-yazi">Bilgisayar: ${esc(y.pc)} · sürüm ${esc(y.surum)}</div>
-          ${y.surum < '1.1.0' ? `<div class="kucuk-yazi" style="margin-top:4px"><b>Yeni sürüm var:</b> <a href="dosya_yardimcisi.zip" download>dosya_yardimcisi.zip</a>'i indirip içindeki KUR.bat'ı tekrar çalıştırın (bilgisayardaki her klasörden seçebilmek için).</div>` : ''}</div></div>
+          ${y.surum < '1.2.0' ? `<div class="kucuk-yazi" style="margin-top:4px"><b>Yeni sürüm var:</b> <a href="dosya_yardimcisi.zip" download>dosya_yardimcisi.zip</a>'i indirip içindeki KUR.bat'ı tekrar çalıştırın (klasör seçme ve taşınan klasörü takip için).</div>` : ''}</div></div>
         <div class="alan"><label>Ana klasör (proje klasörlerinin bulunduğu yer)</label>
           <div style="display:flex;gap:8px;flex-wrap:wrap"><input class="girdi" id="kokYol" value="${esc(y.kok || '')}" placeholder="C:\\Users\\...\\ZEMİN ETÜT RAPORLARI" style="flex:1;min-width:260px">
           <button class="dugme" id="kokSec">${ikon('klasor')}Seç…</button><button class="dugme" id="kokKaydet">Kaydet</button></div>
@@ -529,21 +619,9 @@ async function eslesmeKaydet() {
     sonuc.innerHTML = `<div class="soluk">${esc(c.k.ad)} işleniyor… (${bag + 1}/${ciftler.length})</div>`;
     try {
       await api('PUT', `is_takip/isler/${encodeURIComponent(c.isId)}`, { klasor: c.k.klasor }); bag++;
-      const { dosyalar } = await yardimci(`/liste?klasor=${encodeURIComponent(c.k.klasor)}`);
-      const var_ = new Set(isDosyalari(c.isId).map(d => d.ad));
-      for (const f of dosyalar.filter(f => !var_.has(f.ad))) {
-        let yol = null;
-        if (bulut) {
-          try {
-            const r = await yardimci(`/oku?klasor=${encodeURIComponent(c.k.klasor)}&ad=${encodeURIComponent(f.ad)}`, { ham: true, sure: 120000 });
-            const b = await bulutaKoy(c.isId, await r.blob(), f.ad); if (b.yol) { yol = b.yol; bulutta++; }
-          } catch (e) { /* bilgisayarda kalır */ }
-        }
-        const { data, error } = await BULUT.sb.from('dosyalar').insert({ is_id: c.isId, kategori: kategoriTahmin(f.ad), ad: f.ad, boyut: f.boyut,
-          tur: '', bulut_yolu: yol, pc: buCihaz(), ekleyen: BULUT.eposta }).select().single();
-        if (error) throw sbHata(error);
-        DOSYA.satirlar.set(data.id, data); dosya++;
-      }
+      yardimci('/isaretle', { json: { liste: [{ klasor: c.k.klasor, is_id: c.isId }] } }).then(r => gorulduYaz(r.var || [])).catch(() => {});
+      DOSYA.kayip.delete(c.isId); DOSYA.dogrulandi.delete(c.isId);
+      const e2 = await klasorDosyalariniEkle(c.isId, c.k.klasor, bulut); dosya += e2.dosya; bulutta += e2.bulutta;
     } catch (e) { hatalar.push(`${c.k.ad}: ${e.message}`); }
   }
   sonuc.innerHTML = `<div class="kutu ${hatalar.length ? 'uyari' : 'basari'}">${ikon(hatalar.length ? 'uyari' : 'tamam')}<div>
