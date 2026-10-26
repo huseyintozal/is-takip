@@ -26,6 +26,10 @@ const DOSYA = { satirlar: new Map(), yardimci: null, yardimciZaman: 0, kanal: nu
 const boyutYaz = b => !b ? '0 KB' : b >= 1024 ** 3 ? (b / 1024 ** 3).toFixed(2) + ' GB' : b >= 1024 ** 2 ? (b / 1024 ** 2).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
 const uzantiAl = ad => ((ad.match(/\.([A-Za-z0-9]{1,8})$/) || [])[1] || '').toLowerCase();
 const buCihaz = () => DOSYA.yardimci && DOSYA.yardimci.pc;
+/* Dosya adı alt klasör içerebilir ("RİSKLİ RAPOR/ATLAS 2373-12/x.pdf"): yardımcıya klasör + yalın ad olarak verilir */
+const yerAyir = (klasor, ad) => { const p = String(ad || '').split('/').filter(Boolean); const dosya = p.pop() || ''; return { klasor: p.length ? String(klasor).replace(/[\\/]+$/, '') + '/' + p.join('/') : klasor, ad: dosya }; };
+const yalinAd = ad => String(ad || '').split('/').pop();
+const altYol = ad => String(ad || '').split('/').slice(0, -1).join('/');
 const bulutaYuklensin = () => { try { return localStorage.getItem('isTakip.bulutaYukle') !== '0'; } catch (e) { return true; } };
 
 // ------------------------------------------------------------------ Dosya Yardımcısı (bilgisayardaki servis)
@@ -133,18 +137,19 @@ async function klasorDogrula(i, zorla = false) {
 }
 /* Klasördeki (listede olmayan) dosyaları işin dosya listesine ekler */
 async function klasorDosyalariniEkle(isId, klasor, bulut = false) {
-  const { dosyalar } = await yardimci(`/liste?klasor=${encodeURIComponent(klasor)}`);
+  const { dosyalar } = await yardimci(`/liste?klasor=${encodeURIComponent(klasor)}&alt=1`, { sure: 60000 });
   const var_ = new Set(isDosyalari(isId).map(d => d.ad));
   let dosya = 0, bulutta = 0;
   for (const f of dosyalar.filter(f => !var_.has(f.ad))) {
     let yol = null;
     if (bulut) {
       try {
-        const r = await yardimci(`/oku?klasor=${encodeURIComponent(klasor)}&ad=${encodeURIComponent(f.ad)}`, { ham: true, sure: 120000 });
+        const y = yerAyir(klasor, f.ad);
+        const r = await yardimci(`/oku?klasor=${encodeURIComponent(y.klasor)}&ad=${encodeURIComponent(y.ad)}`, { ham: true, sure: 120000 });
         const b = await bulutaKoy(isId, await r.blob(), f.ad); if (b.yol) { yol = b.yol; bulutta++; }
       } catch (e) { /* bilgisayarda kalır */ }
     }
-    const { data, error } = await BULUT.sb.from('dosyalar').insert({ is_id: isId, kategori: kategoriTahmin(f.ad), ad: f.ad, boyut: f.boyut,
+    const { data, error } = await BULUT.sb.from('dosyalar').insert({ is_id: isId, kategori: kategoriTahmin(yalinAd(f.ad)), ad: f.ad, boyut: f.boyut,
       tur: '', bulut_yolu: yol, pc: buCihaz(), ekleyen: BULUT.eposta }).select().single();
     if (error) throw sbHata(error);
     DOSYA.satirlar.set(data.id, data); dosya++;
@@ -205,13 +210,14 @@ function birakilanDosyalar(dt) {
   if (!girdiler.length) return Promise.resolve([...dt.files]);       // eski tarayıcı
   const dosya = g => new Promise((coz, red) => g.file(coz, red));
   const oku = okuyucu => new Promise((coz, red) => okuyucu.readEntries(coz, red));
-  async function topla(g, cikti) {
-    if (g.isFile) { const f = await dosya(g); if (!/^(~\$|\.istakip$|thumbs\.db$|desktop\.ini$)/i.test(f.name)) cikti.push(f); return; }
+  async function topla(g, cikti, yol) {        // yol: klasör yapısı korunur ("RİSKLİ RAPOR/ATLAS 2373-12")
+    if (g.isFile) { const f = await dosya(g); if (!/^(~\$|\.istakip$|thumbs\.db$|desktop\.ini$)/i.test(f.name)) { f.altKlasor = yol; cikti.push(f); } return; }
     if (!g.isDirectory) return;
+    const alt = (yol ? yol + '/' : '') + g.name.replace(/[<>:"/\\|?*]/g, '_');
     const okuyucu = g.createReader();
-    for (;;) { const parca = await oku(okuyucu); if (!parca.length) break; for (const x of parca) await topla(x, cikti); }
+    for (;;) { const parca = await oku(okuyucu); if (!parca.length) break; for (const x of parca) await topla(x, cikti, alt); }
   }
-  return (async () => { const cikti = []; for (const g of girdiler) await topla(g, cikti); return cikti; })();
+  return (async () => { const cikti = []; for (const g of girdiler) await topla(g, cikti, ''); return cikti; })();
 }
 /* Dosyaları işe ekler: bilgisayara (yardımcı varsa) + buluta (açıksa ve yer varsa) */
 async function dosyaEkle(isId, kategori, dosyalar) {
@@ -227,9 +233,10 @@ async function dosyaEkle(isId, kategori, dosyalar) {
   let tamam = 0; const uyarilar = [];
   for (const d of dosyalar) {
     if (durum) durum.textContent = `${d.name} yükleniyor… (${tamam + 1}/${dosyalar.length})`;
-    let ad = d.name, pcOk = false, yol = null;
+    const alt = d.altKlasor || '';
+    let ad = (alt ? alt + '/' : '') + d.name, pcOk = false, yol = null;
     if (pcde) {
-      try { const r = await yardimci(`/yaz?klasor=${encodeURIComponent(klasor)}&ad=${encodeURIComponent(d.name)}`, { govde: d, sure: 120000 }); ad = r.ad; pcOk = true; }
+      try { const y = yerAyir(klasor, ad); const r = await yardimci(`/yaz?klasor=${encodeURIComponent(y.klasor)}&ad=${encodeURIComponent(y.ad)}`, { govde: d, sure: 120000 }); ad = (alt ? alt + '/' : '') + r.ad; pcOk = true; }
       catch (e) { uyarilar.push(`${d.name}: bilgisayara yazılamadı (${e.message})`); }
     }
     if (bulut) {
@@ -267,7 +274,7 @@ async function dosyaAc(id) {
     let klasor = i.klasor ? await klasorDogrula(i) : '';
     if (i.klasor && !klasor) { dosyaKartiCiz(i.id); return bildir('Bu işin klasörü bulunamadı (taşınmış ya da silinmiş). "Klasörü değiştir" ile yeni yerini seçin.', 'hata'); }
     if (klasor) {
-      try { await yardimci('/ac', { json: { klasor, ad: d.ad } }); return; }
+      try { await yardimci('/ac', { json: yerAyir(klasor, d.ad) }); return; }
       catch (e) { if (e.kod !== 404) return hataGoster(e); }
     }
     if (d.bulut_yolu) {                     // bu bilgisayarda yok: buluttan indir, klasöre koy, aç
@@ -276,8 +283,9 @@ async function dosyaAc(id) {
         klasor = klasor || await isKlasoru(i);
         const { data, error } = await BULUT.sb.storage.from('dosyalar').download(d.bulut_yolu);
         if (error) throw sbHata(error);
-        const r = await yardimci(`/yaz?klasor=${encodeURIComponent(klasor)}&ad=${encodeURIComponent(d.ad)}&uzerine=1`, { govde: data, sure: 120000 });
-        await yardimci('/ac', { json: { klasor, ad: r.ad } });
+        const y = yerAyir(klasor, d.ad);
+        const r = await yardimci(`/yaz?klasor=${encodeURIComponent(y.klasor)}&ad=${encodeURIComponent(y.ad)}&uzerine=1`, { govde: data, sure: 120000 });
+        await yardimci('/ac', { json: { klasor: y.klasor, ad: r.ad } });
         return;
       } catch (e) { return hataGoster(e); }
     }
@@ -286,7 +294,7 @@ async function dosyaAc(id) {
   if (!d.bulut_yolu) return bildir(`Bu dosya yalnızca "${d.pc || 'başka bir'}" bilgisayarında, buluta yüklenmemiş`, 'hata');
   const pencere = window.open('', '_blank');          // telefonda açılır pencere engeline takılmasın diye hemen açılır
   const gorunur = ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'txt'].includes(uzantiAl(d.ad));
-  const { data, error } = await BULUT.sb.storage.from('dosyalar').createSignedUrl(d.bulut_yolu, 600, gorunur ? undefined : { download: d.ad });
+  const { data, error } = await BULUT.sb.storage.from('dosyalar').createSignedUrl(d.bulut_yolu, 600, gorunur ? undefined : { download: yalinAd(d.ad) });
   if (error) { if (pencere) pencere.close(); return hataGoster(sbHata(error)); }
   if (pencere) pencere.location = data.signedUrl; else location.href = data.signedUrl;
 }
@@ -296,7 +304,8 @@ async function dosyaBulutaYukle(id) {
   await yardimciDenetle();
   if (!yardimciHazir() || !i.klasor) return bildir('Dosya bu bilgisayarda değil', 'hata');
   try {
-    const r = await yardimci(`/oku?klasor=${encodeURIComponent(i.klasor)}&ad=${encodeURIComponent(d.ad)}`, { ham: true, sure: 120000 });
+    const y = yerAyir(i.klasor, d.ad);
+    const r = await yardimci(`/oku?klasor=${encodeURIComponent(y.klasor)}&ad=${encodeURIComponent(y.ad)}`, { ham: true, sure: 120000 });
     const b = await bulutaKoy(i.id, await r.blob(), d.ad);
     if (!b.yol) throw new Error('Buluta yüklenmedi: ' + b.hata);
     const { data, error } = await BULUT.sb.from('dosyalar').update({ bulut_yolu: b.yol }).eq('id', id).select().single();
@@ -310,7 +319,7 @@ async function dosyaSil(id) {
   if (!await onayla('Dosya silinsin mi?', `<b>${esc(d.ad)}</b> listeden ve buluttan silinecek.${buCihaz() && d.pc === buCihaz() ? ' Bilgisayardaki kopyası proje klasöründen <b>_silinenler</b> klasörüne taşınır.' : ''}`, 'Sil', true)) return;
   try {
     if (d.bulut_yolu) await BULUT.sb.storage.from('dosyalar').remove([d.bulut_yolu]);
-    if (yardimciHazir() && i.klasor && d.pc === buCihaz()) await yardimci('/sil', { json: { klasor: i.klasor, ad: d.ad } }).catch(() => {});
+    if (yardimciHazir() && i.klasor && d.pc === buCihaz()) await yardimci('/sil', { json: yerAyir(i.klasor, d.ad) }).catch(() => {});
     const { error } = await BULUT.sb.from('dosyalar').delete().eq('id', id);
     if (error) throw sbHata(error);
     DOSYA.satirlar.delete(id); dosyaKartiCiz(d.is_id); bildir('Dosya silindi');
@@ -344,13 +353,14 @@ function dosyaKartiCiz(isId) {
   ].join('');
   const satir = d => `<li class="dosya-satir" data-dosya="${esc(d.id)}" draggable="${yaz}">
       <div class="dosya-ikon ${esc(uzantiAl(d.ad))}">${esc(uzantiAl(d.ad).toUpperCase().slice(0, 4) || 'DOS')}</div>
-      <div class="ad"><a href="#" data-ac="${esc(d.id)}" title="Aç">${esc(d.ad)}</a>
+      <div class="ad">${altYol(d.ad) ? `<div class="kucuk-yazi soluk">${ikon('klasor')} ${esc(altYol(d.ad).split('/').join(' › '))}</div>` : ''}<a href="#" data-ac="${esc(d.id)}" title="Aç">${esc(yalinAd(d.ad))}</a>
         <div class="kucuk-yazi">${boyutYaz(d.boyut || 0)} · ${esc(new Date(d.eklenme).toLocaleDateString('tr-TR'))}${d.ekleyen ? ' · ' + esc(d.ekleyen.split('@')[0]) : ''} ${rozet(d)}</div></div>
       ${yaz && !d.bulut_yolu && d.pc === buCihaz() ? `<button class="dugme kucuk hayalet" data-bulut="${esc(d.id)}" title="Buluta yükle">${ikon('bulut')}</button>` : ''}
       ${yaz ? `<button class="dugme kucuk hayalet tehlike" data-sil="${esc(d.id)}" title="Sil">${ikon('sil')}</button>` : ''}</li>`;
   kart.innerHTML = `<div class="kart-bas"><h2>Dosyalar</h2><span class="aciklama">${liste.length ? liste.length + ' dosya' : 'Dosyayı ilgili bölüme sürükleyin'}</span>
       <div style="flex:1"></div>
       ${yardimciHazir() && i.klasor && !kayip ? `<button class="dugme kucuk" id="klasorAc" title="${esc(i.klasor)}">${ikon('klasor')}Klasörü aç</button>` : ''}
+      ${yardimciHazir() && yaz && i.klasor && !kayip ? `<button class="dugme kucuk hayalet" id="klasorYenile" title="Bilgisayarda klasöre sonradan konan dosyaları listeye ekler">Klasörden güncelle</button>` : ''}
       ${yardimciHazir() && yaz ? `<button class="dugme kucuk hayalet" id="klasorDegistir" title="Bilgisayardaki herhangi bir klasörü bu işe bağla">${i.klasor ? 'Klasörü değiştir' : 'Klasör seç'}</button>` : ''}</div>
     ${kayip ? `<div class="kutu uyari" style="margin:0 0 10px">${ikon('uyari')}<div><b>Klasör bulunamadı.</b> <span class="kucuk-yazi">${esc(i.klasor)}</span><br>
       Taşınmış ya da silinmiş, bilgisayarda da bulunamadı. <b>Klasörü değiştir</b> ile yeni yerini seçin.</div></div>` : ''}
@@ -375,6 +385,13 @@ function dosyaKartiCiz(isId) {
     yardimci('/ac', { json: { klasor: k } }).catch(hataGoster);
   };
   if ($('#klasorDegistir', kart)) $('#klasorDegistir', kart).onclick = () => klasorDegistir(isId);
+  if ($('#klasorYenile', kart)) $('#klasorYenile', kart).onclick = async () => {
+    try {
+      const k = await klasorDogrula(i, true); if (!k) return dosyaKartiCiz(isId);
+      const { dosya } = await klasorDosyalariniEkle(isId, k);
+      bildir(dosya ? `${dosya} yeni dosya listeye eklendi` : 'Klasörde yeni dosya yok'); dosyaKartiCiz(isId);
+    } catch (e) { hataGoster(e); }
+  };
   if (!yaz) return;
   $$('[data-ekle]', kart).forEach(b => b.onclick = async () => dosyaEkle(isId, b.dataset.ekle, await dosyaSec(true)));
   $$('.dosya-satir', kart).forEach(li => li.ondragstart = e => { e.dataTransfer.setData('text/is-dosya', li.dataset.dosya); });
@@ -451,7 +468,7 @@ async function dosyalarSayfasi() {
       <div class="kart-ic yigin">${y ? `
         <div class="sistem-satir" style="padding:0"><div class="durum-ikon ok">${ikon('tamam')}</div>
           <div style="flex:1"><b>Dosya Yardımcısı çalışıyor</b><div class="soluk kucuk-yazi">Bilgisayar: ${esc(y.pc)} · sürüm ${esc(y.surum)}</div>
-          ${y.surum < '1.2.0' ? `<div class="kucuk-yazi" style="margin-top:4px"><b>Yeni sürüm var:</b> <a href="dosya_yardimcisi.zip" download>dosya_yardimcisi.zip</a>'i indirip içindeki KUR.bat'ı tekrar çalıştırın (klasör seçme ve taşınan klasörü takip için).</div>` : ''}</div></div>
+          ${y.surum < '1.3.0' ? `<div class="kucuk-yazi" style="margin-top:4px"><b>Yeni sürüm var:</b> <a href="dosya_yardimcisi.zip" download>dosya_yardimcisi.zip</a>'i indirip içindeki KUR.bat'ı tekrar çalıştırın (alt klasörler, klasör seçme ve taşınan klasör takibi için).</div>` : ''}</div></div>
         <div class="alan"><label>Ana klasör (proje klasörlerinin bulunduğu yer)</label>
           <div style="display:flex;gap:8px;flex-wrap:wrap"><input class="girdi" id="kokYol" value="${esc(y.kok || '')}" placeholder="C:\\Users\\...\\ZEMİN ETÜT RAPORLARI" style="flex:1;min-width:260px">
           <button class="dugme" id="kokSec">${ikon('klasor')}Seç…</button><button class="dugme" id="kokKaydet">Kaydet</button></div>
@@ -656,7 +673,7 @@ async function eslesmeKaydet() {
 async function eksikleriBul() {
   const pc = buCihaz();
   const adaylar = [...DOSYA.satirlar.values()].filter(d => d.bulut_yolu);
-  const sorgu = adaylar.map(d => ({ klasor: (BULUT.isler.get(d.is_id) || {}).klasor || '', ad: d.ad }));
+  const sorgu = adaylar.map(d => { const k = (BULUT.isler.get(d.is_id) || {}).klasor || ''; return k ? yerAyir(k, d.ad) : { klasor: '', ad: d.ad }; });
   let var_ = [];
   try { var_ = (await yardimci('/varlar', { json: { dosyalar: sorgu }, sure: 60000 })).var; } catch (e) { var_ = adaylar.map(() => true); }
   const eksik = adaylar.filter((d, n) => !sorgu[n].klasor || !var_[n]);
@@ -695,7 +712,8 @@ async function bilgisayaraIndir(eksik) {
       const klasor = await isKlasoru(i);
       const { data, error } = await BULUT.sb.storage.from('dosyalar').download(x.bulut_yolu);
       if (error) throw sbHata(error);
-      await yardimci(`/yaz?klasor=${encodeURIComponent(klasor)}&ad=${encodeURIComponent(x.ad)}&uzerine=1`, { govde: data, sure: 120000 });
+      const y = yerAyir(klasor, x.ad);
+      await yardimci(`/yaz?klasor=${encodeURIComponent(y.klasor)}&ad=${encodeURIComponent(y.ad)}&uzerine=1`, { govde: data, sure: 120000 });
     } catch (e) { hatalar.push(`${x.ad}: ${e.message}`); }
   }
   if (d) d.textContent = '';
