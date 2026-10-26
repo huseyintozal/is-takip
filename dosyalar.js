@@ -15,6 +15,7 @@ Object.assign(IKON, {
 
 const KATEGORI = [
   ['mimari', 'Mimari', 'mimari'], ['evrak', 'Evrak', 'evrak'], ['geo', 'Geo', 'geo'], ['lab', 'Lab sonuçları', 'lab'],
+  ['riskli', 'Riskli rapor', 'riskli_rapor', 'RİSKLİ RAPOR'],     // 4.: bilgisayarda işin klasöründeki alt klasör
   ['rapor', 'Rapor', 'rapor_yazildi'], ['imza_cd', 'İmza-CD', 'imza_cd'], ['diger', 'Diğer dosyalar', null],
 ];
 const KATEGORI_AD = Object.fromEntries(KATEGORI.map(k => [k[0], k[1]]));
@@ -149,7 +150,7 @@ async function klasorDosyalariniEkle(isId, klasor, bulut = false) {
         const b = await bulutaKoy(isId, await r.blob(), f.ad); if (b.yol) { yol = b.yol; bulutta++; }
       } catch (e) { /* bilgisayarda kalır */ }
     }
-    const { data, error } = await BULUT.sb.from('dosyalar').insert({ is_id: isId, kategori: kategoriTahmin(yalinAd(f.ad)), ad: f.ad, boyut: f.boyut,
+    const { data, error } = await BULUT.sb.from('dosyalar').insert({ is_id: isId, kategori: kategoriTahmin(f.ad), ad: f.ad, boyut: f.boyut,
       tur: '', bulut_yolu: yol, pc: buCihaz(), ekleyen: BULUT.eposta }).select().single();
     if (error) throw sbHata(error);
     DOSYA.satirlar.set(data.id, data); dosya++;
@@ -191,6 +192,7 @@ function kategoriTahmin(ad) {
   if (['dwg', 'dxf'].includes(uz) || /MIMARI|VAZIYET|KESIT|KAT PLAN|RÖLÖVE|ROLEVE/.test(s)) return 'mimari';
   if (/TAPU|RUHSAT|EVRAK|IMAR|KROKI|APLIKASYON|SOZLESME|VEKALET|KIMLIK|TAAHHUT/.test(s)) return 'evrak';
   if (/IMZA|\bCD\b/.test(s)) return 'imza_cd';
+  if (/RISKLI/.test(s)) return 'riskli';
   if (/RAPOR/.test(s)) return 'rapor';
   if (/\bGEO|JEOLOJ|JEOFIZ|MASW/.test(s)) return 'geo';
   return 'diger';
@@ -233,7 +235,9 @@ async function dosyaEkle(isId, kategori, dosyalar) {
   let tamam = 0; const uyarilar = [];
   for (const d of dosyalar) {
     if (durum) durum.textContent = `${d.name} yükleniyor… (${tamam + 1}/${dosyalar.length})`;
-    const alt = d.altKlasor || '';
+    const katKlasor = (KATEGORI.find(k => k[0] === kategori) || [])[3];
+    let alt = d.altKlasor || '';
+    if (katKlasor && katla(alt.split('/')[0]) !== katla(katKlasor)) alt = katKlasor + (alt ? '/' + alt : '');
     let ad = (alt ? alt + '/' : '') + d.name, pcOk = false, yol = null;
     if (pcde) {
       try { const y = yerAyir(klasor, ad); const r = await yardimci(`/yaz?klasor=${encodeURIComponent(y.klasor)}&ad=${encodeURIComponent(y.ad)}`, { govde: d, sure: 120000 }); ad = (alt ? alt + '/' : '') + r.ad; pcOk = true; }
