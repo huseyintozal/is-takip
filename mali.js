@@ -91,13 +91,18 @@ function isMali(i) {
   return { bedel, lab: tedarik('lab', 'lab_id', 'lab_ucret', !!i.laba_atildi), sondaj: tedarik('sondaj', 'sondajci_id', 'sondaj_ucret', !!i.sondaj) };
 }
 const cariHareketleri = id => [...MALI.hareketler.values()].filter(h => h.cari_id === id).sort((a, b) => (a.tarih || '').localeCompare(b.tarih || '') || (a.eklenme || '').localeCompare(b.eklenme || ''));
+// Programdan önceki alacaklar (devir): 'tahsilat' türünde EKSİ tutarlı hareket olarak tutulur (ek tablo gerekmesin diye)
+const devirMi = h => h.tur === 'tahsilat' && Number(h.tutar) < 0;
+const tumIsverenler = () => [...new Set([...isverenler(), ...carilerTur('isveren').map(c => c.anahtar)])].sort(trSirala);
 function isverenOzet(anahtar) {
   const isler = tumIsler().filter(i => ik(i.isveren) === anahtar);
   const c = isverenCari(anahtar);
   const bedel = isler.reduce((t, i) => t + isMali(i).bedel.tutar, 0);
   const fiyatsiz = isler.filter(i => isMali(i).bedel.kaynak === 'yok').length;
-  const alinan = c ? cariHareketleri(c.id).filter(h => h.tur === 'tahsilat').reduce((t, h) => t + Number(h.tutar), 0) : 0;
-  return { anahtar, ad: isverenAdi(anahtar), cari: c, isler, bedel, alinan, kalan: bedel - alinan, fiyatsiz };
+  const hr = c ? cariHareketleri(c.id).filter(h => h.tur === 'tahsilat') : [];
+  const alinan = hr.filter(h => !devirMi(h)).reduce((t, h) => t + Number(h.tutar), 0);
+  const devir = hr.filter(devirMi).reduce((t, h) => t - Number(h.tutar), 0);
+  return { anahtar, ad: (c && !isler.length) ? c.ad : isverenAdi(anahtar), cari: c, isler, isBedeli: bedel, devir, bedel: bedel + devir, alinan, kalan: bedel + devir - alinan, fiyatsiz };
 }
 function tedarikciOzet(c) {
   const alan = c.tur === 'lab' ? 'lab' : 'sondaj';
@@ -188,9 +193,57 @@ function hareketPenceresi({ cari, tur, isler = [] }) {
     $('#hTutar').focus();
   });
 }
+/* Programdan önceki alacakları firma firma tek seferde girer */
+function devirPenceresi(liste) {
+  return new Promise(coz => {
+    const p = $('#perde');
+    p.innerHTML = `<div class="pencere genis"><h3>Mevcut alacakları gir</h3>
+      <p class="kucuk-yazi soluk">Programdaki işler dışında, şu an firmalardan alacağın tutarları yaz. Boş bırakılanlara dokunulmaz.
+        Kalan alacağa eklenir; sonra gelen ödemeleri her zamanki gibi "Ödeme al" ile girersin.</p>
+      <form id="dForm" class="yigin">
+        <div class="form-izgara">
+          <div class="alan"><label>Tarih</label><input class="girdi" id="dTarih" type="date" value="${bugunIso()}" required></div>
+          <div class="alan"><label>Açıklama</label><input class="girdi" id="dAciklama" value="Önceki alacak (devir)"></div></div>
+        <div class="tablo-kap" style="max-height:50vh"><table class="veri mali-tablo"><thead><tr><th>Firma</th><th class="sag">Şu anki kalan</th><th style="width:160px">Eklenecek alacak (₺)</th></tr></thead>
+          <tbody>${liste.map(x => `<tr><td>${esc(x.ad)}${x.devir ? `<div class="kucuk-yazi soluk">${tl(x.devir)} devir girilmiş</div>` : ''}</td><td class="sag">${tl(Math.max(0, x.kalan))}</td>
+            <td><input class="girdi fiyat-girdi" data-devir="${esc(x.anahtar)}" inputmode="decimal" placeholder="₺"></td></tr>`).join('')}
+            <tr><td><input class="girdi" id="dYeniAd" placeholder="Listede olmayan firma adı"></td><td></td><td><input class="girdi fiyat-girdi" id="dYeniTutar" inputmode="decimal" placeholder="₺"></td></tr></tbody></table></div>
+        <div class="dugmeler"><button type="button" class="dugme hayalet" data-c="0">Vazgeç</button><button class="dugme ana" type="submit">${ikon('kaydet')}Kaydet</button></div></form></div>`;
+    p.classList.remove('gizli'); ikonlariDoldur(p);
+    const kapat = v => { p.classList.add('gizli'); p.innerHTML = ''; coz(v); };
+    $('[data-c="0"]', p).onclick = () => kapat(false);
+    p.onclick = e => { if (e.target === p) kapat(false); };
+    $('#dForm').onsubmit = async e => {
+      e.preventDefault();
+      const girilen = $$('[data-devir]', p).map(g => ({ anahtar: g.dataset.devir, deger: g.value.trim() })).filter(x => x.deger);
+      const yeniAd = $('#dYeniAd').value.trim(), yeniT = $('#dYeniTutar').value.trim();
+      if (yeniAd && yeniT) girilen.push({ anahtar: ik(yeniAd), ad: yeniAd, deger: yeniT });
+      for (const x of girilen) { const n = tutarOku(x.deger); if (!n || n <= 0) return bildir(`Geçerli bir tutar yazın: ${x.deger}`, 'hata'); x.tutar = n; }
+      if (!girilen.length) return kapat(false);
+      const dugme = $('#dForm button[type=submit]'); dugme.disabled = true;
+      try {
+        for (const x of girilen) {
+          let c = isverenCari(x.anahtar);
+          if (!c && x.ad) {
+            const { data, error } = await BULUT.sb.from('cariler').upsert({ tur: 'isveren', ad: x.ad.toLocaleUpperCase('tr'), anahtar: x.anahtar }, { onConflict: 'tur,anahtar' }).select().single();
+            if (error) throw sbHata(error);
+            MALI.cariler.set(data.id, data); c = data;
+          }
+          if (!c) c = await isverenCariAl(x.anahtar);
+          const { data, error } = await BULUT.sb.from('hareketler').insert({ cari_id: c.id, tur: 'tahsilat', tutar: -x.tutar, tarih: $('#dTarih').value,
+            aciklama: $('#dAciklama').value.trim(), is_id: null, ekleyen: BULUT.eposta }).select().single();
+          if (error) throw sbHata(error);
+          MALI.hareketler.set(data.id, data);
+        }
+        bildir(`${girilen.length} firmaya toplam ${tl(girilen.reduce((t, x) => t + x.tutar, 0))} alacak eklendi`);
+        kapat(true);
+      } catch (x2) { dugme.disabled = false; hataGoster(x2); }
+    };
+  });
+}
 async function hareketSil(id) {
   const h = MALI.hareketler.get(id); if (!h) return;
-  if (!await onayla('Kayıt silinsin mi?', `${esc(new Date(h.tarih).toLocaleDateString('tr-TR'))} tarihli <b>${tl(h.tutar)}</b> ${h.tur === 'tahsilat' ? 'tahsilat' : 'ödeme'} silinecek.`, 'Sil', true)) return false;
+  if (!await onayla('Kayıt silinsin mi?', `${esc(new Date(h.tarih).toLocaleDateString('tr-TR'))} tarihli <b>${tl(Math.abs(h.tutar))}</b> ${devirMi(h) ? 'devir alacak' : h.tur === 'tahsilat' ? 'tahsilat' : 'ödeme'} silinecek.`, 'Sil', true)) return false;
   const { error } = await BULUT.sb.from('hareketler').delete().eq('id', id);
   if (error) { hataGoster(sbHata(error)); return false; }
   MALI.hareketler.delete(id); return true;
@@ -209,11 +262,11 @@ async function maliSayfasi(rest) {
   IT.isler = tumIsler(); IT.kopyalar = [];
   if (rest[0] === 'isveren' && rest[1]) return isverenHesapSayfasi(ik(rest[1]));
   if (rest[0] === 'cari' && rest[1]) return tedarikciSayfasi(rest[1]);
-  const isverenler_ = isverenler().map(isverenOzet).sort((a, b) => b.kalan - a.kalan || trSirala(a.ad, b.ad));
+  const isverenler_ = tumIsverenler().map(isverenOzet).sort((a, b) => b.kalan - a.kalan || trSirala(a.ad, b.ad));
   const tedarik = ['lab', 'sondaj'].flatMap(t => carilerTur(t)).map(tedarikciOzet);
   const toplamAlacak = isverenler_.reduce((t, x) => t + Math.max(0, x.kalan), 0);
   const ay = bugunIso().slice(0, 7);
-  const buAy = [...MALI.hareketler.values()].filter(h => h.tur === 'tahsilat' && (h.tarih || '').startsWith(ay)).reduce((t, h) => t + Number(h.tutar), 0);
+  const buAy = [...MALI.hareketler.values()].filter(h => h.tur === 'tahsilat' && !devirMi(h) && (h.tarih || '').startsWith(ay)).reduce((t, h) => t + Number(h.tutar), 0);
   const borc = t => tedarik.filter(x => x.cari.tur === t).reduce((s, x) => s + Math.max(0, x.kalan), 0);
   const fiyatsiz = isverenler_.reduce((t, x) => t + x.fiyatsiz, 0);
   const sekme = MALI.sekme;
@@ -233,13 +286,15 @@ async function maliSayfasi(rest) {
   $$('[data-sekme]').forEach(b => b.onclick = () => { MALI.sekme = b.dataset.sekme; maliSayfasi([]); });
   const kutu = $('#maliIcerik');
   if (sekme === 'isveren') {
-    kutu.innerHTML = `<div class="kart"><div class="tablo-kap"><table class="veri mali-tablo"><thead><tr>
+    kutu.innerHTML = `<div class="kart"><div class="kart-bas"><h2>İşverenler</h2><span class="aciklama">Programa girmemiş eski alacakları "Mevcut alacakları gir" ile ekleyin</span>
+        <div style="flex:1"></div><button class="dugme" id="devirGir">${ikon('arti')}Mevcut alacakları gir</button></div>
+      <div class="tablo-kap"><table class="veri mali-tablo"><thead><tr>
         <th>İşveren</th><th class="sag">İş</th><th style="width:150px">İş başı fiyat</th><th class="sag">Toplam bedel</th><th class="sag">Alınan</th><th class="sag">Kalan</th><th></th></tr></thead>
       <tbody>${isverenler_.map(x => `<tr data-isveren="${esc(x.anahtar)}">
         <td><a href="#/mali/isveren/${encodeURIComponent(x.anahtar)}" class="ms">${esc(x.ad)}</a>${x.fiyatsiz ? `<div class="kucuk-yazi" style="color:var(--turuncu)">${x.fiyatsiz} iş fiyatsız</div>` : ''}</td>
         <td class="sag">${x.isler.length}</td>
         <td><input class="girdi fiyat-girdi" data-fiyat="${esc(x.anahtar)}" inputmode="decimal" value="${x.cari && Number(x.cari.varsayilan_ucret) ? esc(String(Number(x.cari.varsayilan_ucret))) : ''}" placeholder="₺">${(() => { const n = x.isler.filter(i => isMali(i).bedel.kaynak === 'ozel').length; return n && x.cari && Number(x.cari.varsayilan_ucret) ? `<div class="kucuk-yazi soluk">${n} iş özel fiyatta · <a href="#" data-hepsine="${esc(x.anahtar)}">hepsine uygula</a></div>` : ''; })()}</td>
-        <td class="sag">${tl(x.bedel)}</td><td class="sag">${tl(x.alinan)}</td><td class="sag">${!x.bedel && !x.alinan ? '<span class="soluk">—</span>' : kalanEtiket(x.kalan)}</td>
+        <td class="sag">${tl(x.bedel)}${x.devir ? `<div class="kucuk-yazi soluk">${tl(x.devir)} devir dahil</div>` : ''}</td><td class="sag">${tl(x.alinan)}</td><td class="sag">${!x.bedel && !x.alinan ? '<span class="soluk">—</span>' : kalanEtiket(x.kalan)}</td>
         <td class="sag"><button class="dugme kucuk" data-tahsil="${esc(x.anahtar)}">${ikon('arti')}Ödeme al</button></td></tr>`).join('')}</tbody>
       <tfoot><tr><td><b>Toplam</b></td><td class="sag">${isverenler_.reduce((t, x) => t + x.isler.length, 0)}</td><td></td>
         <td class="sag"><b>${tl(isverenler_.reduce((t, x) => t + x.bedel, 0))}</b></td><td class="sag"><b>${tl(isverenler_.reduce((t, x) => t + x.alinan, 0))}</b></td>
@@ -249,6 +304,7 @@ async function maliSayfasi(rest) {
       if (g.value.trim() && n === null) return bildir('Geçerli bir fiyat yazın', 'hata');
       try { await isverenFiyatDegistir(g.dataset.fiyat, n || 0); maliSayfasi([]); } catch (e) { hataGoster(e); }
     });
+    $('#devirGir').onclick = async () => { if (await devirPenceresi(isverenler_)) maliSayfasi([]); };
     $$('[data-hepsine]', kutu).forEach(a => a.onclick = async e => {
       e.preventDefault();
       try { await ozelFiyatlariKaldir(a.dataset.hepsine); maliSayfasi([]); } catch (x2) { hataGoster(x2); }
@@ -297,8 +353,8 @@ async function maliSayfasi(rest) {
       <tbody>${liste.map(h => { const c = MALI.cariler.get(h.cari_id) || {}; const i = h.is_id && BULUT.isler.get(h.is_id);
         return `<tr><td>${esc(new Date(h.tarih).toLocaleDateString('tr-TR'))}</td>
           <td><a href="${c.tur === 'isveren' ? '#/mali/isveren/' + encodeURIComponent(c.anahtar) : '#/mali/cari/' + c.id}">${esc(c.ad || '?')}</a></td>
-          <td>${h.tur === 'tahsilat' ? '<span class="etiket yesil">Alınan</span>' : '<span class="etiket kirmizi">Ödenen</span>'}</td>
-          <td class="sag"><b>${tl(h.tutar)}</b></td><td class="kucuk-yazi">${esc(h.aciklama)}${i ? ` · ${esc(kimlik(i))}` : ''}<div class="soluk">${esc((h.ekleyen || '').split('@')[0])}</div></td>
+          <td>${devirMi(h) ? '<span class="etiket turuncu">Devir alacak</span>' : h.tur === 'tahsilat' ? '<span class="etiket yesil">Alınan</span>' : '<span class="etiket kirmizi">Ödenen</span>'}</td>
+          <td class="sag"><b>${tl(Math.abs(h.tutar))}</b></td><td class="kucuk-yazi">${esc(h.aciklama)}${i ? ` · ${esc(kimlik(i))}` : ''}<div class="soluk">${esc((h.ekleyen || '').split('@')[0])}</div></td>
           <td class="sag"><button class="dugme kucuk hayalet tehlike" data-hsil="${esc(h.id)}">${ikon('sil')}</button></td></tr>`; }).join('')}</tbody></table></div>`
       : '<div class="kart-ic soluk">Henüz ödeme kaydı yok.</div>'}</div>`;
     $$('[data-hsil]', kutu).forEach(b => b.onclick = async () => { if (await hareketSil(b.dataset.hsil)) maliSayfasi([]); });
@@ -309,9 +365,11 @@ async function maliSayfasi(rest) {
 function isverenHesapSayfasi(anahtar) {
   const x = isverenOzet(anahtar);
   IT.kopyalar = [];
-  const hareket = x.cari ? cariHareketleri(x.cari.id).filter(h => h.tur === 'tahsilat') : [];
+  const hareket = x.cari ? cariHareketleri(x.cari.id).filter(h => h.tur === 'tahsilat' && !devirMi(h)) : [];
+  const devirler = x.cari ? cariHareketleri(x.cari.id).filter(devirMi) : [];
   const ozetMetin = [`${x.ad} – Hesap özeti (${bugun()})`, '',
     `İş sayısı: ${x.isler.length}`, `Toplam iş bedeli: ${tl(x.bedel)}`, `Alınan: ${tl(x.alinan)}`, `Kalan: ${tl(Math.max(0, x.kalan))}`, '',
+    ...(devirler.length ? ['Önceki alacak (devir):', ...devirler.map(h => `- ${new Date(h.tarih).toLocaleDateString('tr-TR')}: ${tl(-h.tutar)}${h.aciklama ? ' (' + h.aciklama + ')' : ''}`), ''] : []),
     'İşler:', ...x.isler.map(i => `- ${kimlik(i)}: ${tl(isMali(i).bedel.tutar)}`),
     ...(hareket.length ? ['', 'Ödemeler:', ...hareket.map(h => `- ${new Date(h.tarih).toLocaleDateString('tr-TR')}: ${tl(h.tutar)}${h.aciklama ? ' (' + h.aciklama + ')' : ''}`)] : [])].join('\n');
   sayfaYaz(`<div class="ust"><a class="geri" href="#/mali">${ikon('geri')}</a><div><h1>${esc(x.ad)}</h1><div class="alt">${x.isler.length} iş · bedel ${tl(x.bedel)} · alınan ${tl(x.alinan)}</div></div>
@@ -331,7 +389,11 @@ function isverenHesapSayfasi(anahtar) {
             <td><span class="etiket ${d.asama.renk}">${esc(d.asama.ad)}</span></td>
             <td><input class="girdi fiyat-girdi ${m.bedel.kaynak === 'ozel' ? 'ozel' : ''}" data-isucret="${esc(i.id)}" inputmode="decimal"
               value="${m.bedel.kaynak === 'ozel' ? Number(m.bedel.tutar) : ''}" placeholder="${m.bedel.kaynak === 'varsayilan' ? tl(m.bedel.tutar) : 'fiyat yok'}"></td></tr>`; }).join('')}</tbody></table></div></div>
-      <div class="yan yigin"><div class="kart"><div class="kart-bas"><h2>Alınan ödemeler</h2></div>
+      <div class="yan yigin">${devirler.length ? `<div class="kart"><div class="kart-bas"><h2>Önceki alacak (devir)</h2></div>
+        <ul class="liste mali-liste">${devirler.map(h => `<li><div class="ad"><div><b>${tl(-h.tutar)}</b></div>
+          <div class="kucuk-yazi">${esc(new Date(h.tarih).toLocaleDateString('tr-TR'))}${h.aciklama ? ' · ' + esc(h.aciklama) : ''}</div></div>
+          <button class="dugme kucuk hayalet tehlike" data-hsil="${esc(h.id)}">${ikon('sil')}</button></li>`).join('')}</ul></div>` : ''}
+        <div class="kart"><div class="kart-bas"><h2>Alınan ödemeler</h2></div>
         ${hareket.length ? `<ul class="liste mali-liste">${hareket.slice().reverse().map(h => `<li><div class="ad"><div><b>${tl(h.tutar)}</b></div>
           <div class="kucuk-yazi">${esc(new Date(h.tarih).toLocaleDateString('tr-TR'))}${h.aciklama ? ' · ' + esc(h.aciklama) : ''}${h.is_id && BULUT.isler.get(h.is_id) ? ' · ' + esc(kimlik(BULUT.isler.get(h.is_id))) : ''}</div></div>
           <button class="dugme kucuk hayalet tehlike" data-hsil="${esc(h.id)}">${ikon('sil')}</button></li>`).join('')}</ul>` : '<div class="kart-ic soluk kucuk-yazi">Henüz ödeme alınmadı.</div>'}</div></div></div>`);
