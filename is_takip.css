@@ -1,7 +1,7 @@
 /* İş takibi — stil.css'e EK sınıflar. Yalnızca stil.css'teki renk değişkenlerini kullanır. */
 
 /* özet kutuları (kimde bekliyor) */
-.ozet-kutular { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px; }
+.ozet-kutular { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 16px; }
 .ozet-kutu { padding: 14px 16px; cursor: pointer; display: flex; align-items: center; gap: 12px; border: 1px solid var(--cizgi); transition: border-color .15s, box-shadow .15s; text-align: left; font: inherit; }
 .ozet-kutu:hover { border-color: #b9d9d5; box-shadow: var(--golge2); }
 .ozet-kutu.secili { border-color: var(--vurgu); box-shadow: 0 0 0 3px rgba(15,118,110,.14); }

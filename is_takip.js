@@ -55,6 +55,8 @@ const KIMDE = {
   lab:     { ad: 'Laboratuvarda',         renk: 'vurgu',   ikon: 'deney' },
   tamam:   { ad: 'Tamamlandı',            renk: 'yesil',   ikon: 'tamam' },
 };
+/* Rapor, imza-CD ve lab taraması da bitince iş listeden çıkar, "Bitti" sekmesinde durur */
+const BITTI_KUTU = { ad: 'Bitti', renk: '', ikon: 'tamam' };
 
 /* Sondaj yapıldıysa (ya da sondajcıya verildiyse) bina yıkılmış demektir */
 const binaSondajdan = i => !!(i.sondaj || i.sondaja_atildi);
@@ -73,7 +75,6 @@ const SUZGECLER = {
   rapor:   { grup: 'tamam', ad: 'Rapor yazılacaklar',       f: (i, d) => d.kimde[0] === 'tamam' && !i.rapor_yazildi },
   imza:    { grup: 'tamam', ad: 'İmza-CD bekleyenler',      f: (i, d) => d.kimde[0] === 'tamam' && !i.imza_cd },
   tarama:  { grup: 'tamam', ad: 'Lab taraması bekleyenler', f: (i, d) => d.kimde[0] === 'tamam' && !i.lab_taramasi },
-  bitti:   { grup: 'tamam', ad: 'Tamamen bitenler',          f: (i, d) => d.bitti },
 };
 
 /* İş akışı:  mimari + evrak → zemin değeri (biz) → geo (müşteri) → bina yıkıldı (müşteri bildirir)
@@ -258,10 +259,10 @@ async function islerSayfasi(isveren) {
   const s = suzgec();
   const tum = IT.isler;
   const kapsam = isveren ? tum.filter(i => ik(i.isveren) === isveren) : tum;
-  const say = { musteri: 0, biz: 0, sondaj: 0, lab: 0, tamam: 0 };
+  const say = { musteri: 0, biz: 0, sondaj: 0, lab: 0, tamam: 0, bitti: 0 };
   const fSay = {};
   kapsam.forEach(i => { const d = isDurumu(i); Object.entries(SUZGECLER).forEach(([k, v]) => { if (v.f(i, d)) fSay[k] = (fSay[k] || 0) + 1; }); });
-  kapsam.forEach(i => isDurumu(i).kimde.forEach(k => say[k]++));
+  kapsam.forEach(i => { const d = isDurumu(i); if (d.bitti) say.bitti++; else d.kimde.forEach(k => say[k]++); });
   const iSay = {}; tum.forEach(i => { iSay[ik(i.isveren)] = (iSay[ik(i.isveren)] || 0) + 1; });
 
   sayfaYaz(`
@@ -272,7 +273,7 @@ async function islerSayfasi(isveren) {
       <a class="dugme" href="#/isler/rapor/${encodeURIComponent(isveren)}">${ikon('mesaj')}${isveren ? 'Rapor al' : 'Bütün işverenlerin raporu'}</a>
       ${saltOkunur() ? '' : `<a class="dugme ana" href="#/is/yeni/${encodeURIComponent(isveren)}">${ikon('arti')}Yeni iş</a>`}</div>
     <div class="ozet-kutular">
-      ${Object.entries(KIMDE).map(([k, v]) => `<button class="kart ozet-kutu ${s.kimde === k ? 'secili' : ''}" data-kimde="${k}">
+      ${Object.entries(Object.assign({}, KIMDE, { bitti: BITTI_KUTU })).map(([k, v]) => `<button class="kart ozet-kutu ${s.kimde === k ? 'secili' : ''}" data-kimde="${k}">
         <div class="simge ${v.renk}">${ikon(v.ikon)}</div><div><div class="sayi">${say[k]}</div><div class="baslik">${v.ad}</div></div></button>`).join('')}
     </div>
     <div class="cipler">
@@ -283,13 +284,13 @@ async function islerSayfasi(isveren) {
       <div class="suzgec-satiri yapiskan" id="suzgecSatiri">
         <div class="ara">${ikon('ara')}<input class="girdi" id="ara" placeholder="Mal sahibi, mahalle, ada, parsel ya da not ara" value="${esc(s.ara)}"></div>
         <select class="girdi" id="kimde"><option value="">Bütün durumlar</option>
-          <optgroup label="Kimde bekliyor">${Object.entries(KIMDE).map(([k, v]) => `<option value="${k}" ${s.kimde === k ? 'selected' : ''}>${v.ad} (${say[k]})</option>`).join('')}</optgroup>
+          <optgroup label="Kimde bekliyor">${Object.entries(KIMDE).map(([k, v]) => `<option value="${k}" ${s.kimde === k ? 'selected' : ''}>${v.ad} (${say[k]})</option>`).join('')}
+            <option value="bitti" ${s.kimde === 'bitti' ? 'selected' : ''}>Bitti (${say.bitti})</option></optgroup>
           <optgroup label="Aşama">${Object.entries(SUZGECLER).filter(([, v]) => !v.grup).map(([k, v]) => `<option value="${k}" ${s.kimde === k ? 'selected' : ''}>${v.ad} (${fSay[k] || 0})</option>`).join('')}</optgroup>
           <optgroup label="Tamamlananlar">${Object.entries(SUZGECLER).filter(([, v]) => v.grup === 'tamam').map(([k, v]) => `<option value="${k}" ${s.kimde === k ? 'selected' : ''}>${v.ad} (${fSay[k] || 0})</option>`).join('')}</optgroup></select>
         <select class="girdi" id="sira">
           ${[['isveren', 'İşverene göre'], ['asama', 'İş akışı aşamasına göre'], ['guncel', 'Son güncellenen üstte'], ['ada', 'Ada / parsele göre']]
             .map(([k, v]) => `<option value="${k}" ${s.sira === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
-        <label class="secim"><input type="checkbox" id="gizle" ${s.gizle ? 'checked' : ''}> Tamamlananları gizle</label>
       </div>
       <div id="tablo"></div>
     </div>`);
@@ -311,7 +312,6 @@ async function islerSayfasi(isveren) {
   });
   $('#kimde').onchange = e => { kaydetS({ kimde: e.target.value }); $$('.ozet-kutu').forEach(x => x.classList.toggle('secili', x.dataset.kimde === e.target.value)); yenile(); };
   $('#sira').onchange = e => { kaydetS({ sira: e.target.value }); yenile(); };
-  $('#gizle').onchange = e => { kaydetS({ gizle: e.target.checked }); yenile(); };
   $('#ara').oninput = e => { kaydetS({ ara: e.target.value }); yenile(); };
   yenile();
 }
@@ -354,9 +354,12 @@ function tabloCiz(isveren) {
   const s = suzgec();
   const q = katla(s.ara.trim());
   let liste = IT.isler.filter(i => !isveren || ik(i.isveren) === isveren).map(i => ({ i, d: isDurumu(i) }));
-  if (SUZGECLER[s.kimde]) liste = liste.filter(x => SUZGECLER[s.kimde].f(x.i, x.d));
-  else if (KIMDE[s.kimde]) liste = liste.filter(x => x.d.kimde.includes(s.kimde));
-  else if (s.gizle) liste = liste.filter(x => !x.d.bitti);          // rapor/imza/tarama bekleyenler görünmeye devam eder
+  if (s.kimde === 'bitti' || s.kimde === 'bitti_eski') liste = liste.filter(x => x.d.bitti);       // "Bitti" sekmesi
+  else {
+    liste = liste.filter(x => !x.d.bitti);                         // biten işler listeden çıkar
+    if (SUZGECLER[s.kimde]) liste = liste.filter(x => SUZGECLER[s.kimde].f(x.i, x.d));
+    else if (KIMDE[s.kimde]) liste = liste.filter(x => x.d.kimde.includes(s.kimde));
+  }
   if (q) liste = liste.filter(({ i }) => katla([i.mal_sahibi, i.mahalle, i.ada, i.parsel, `${i.ada}/${i.parsel}`, i.isveren, i.notlar, ...Object.values(i.alan_notlari || {})].join(' ')).includes(q));
   const ap = i => [parseInt(i.ada) || 0, parseInt(i.parsel) || 0];
   const sira = {

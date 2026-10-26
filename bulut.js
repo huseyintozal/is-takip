@@ -5,7 +5,7 @@
  *  - is_takip.js'in çağırdığı api('GET', 'is_takip/isler') gibi istekler burada Supabase'e çevrilir,
  *    böylece arayüz kodu masaüstü sürümüyle aynı kalır. */
 
-const WEB_SURUM = 'B1.7.1';
+const WEB_SURUM = 'B1.8.0';
 const D = { durum: null, firmalar: null };
 const BULUT = { sb: null, eposta: '', rol: '', isler: new Map(), canli: 'bekliyor', tazeleZaman: null, bekleyenTazele: false };
 
@@ -32,7 +32,8 @@ function sbHata(e) {
 
 // ------------------------------------------------------------------ veri
 const isSirala = (a, b) => (a.olusturma || '').localeCompare(b.olusturma || '') || (a.sira || 0) - (b.sira || 0) || a.id.localeCompare(b.id);
-const tumIsler = () => [...BULUT.isler.values()].sort(isSirala);
+const tumIsler = () => [...BULUT.isler.values()].filter(i => !i.mali_kayit).sort(isSirala);   // iş takibi (yalnızca mali kayıtlar hariç)
+const maliIsler = () => [...BULUT.isler.values()].sort(isSirala);                              // mali takip: geriye dönük girilen işler dahil
 
 async function isleriIndir() {
   const liste = [];
