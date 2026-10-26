@@ -40,5 +40,7 @@ details > summary.esle-bas { margin: 8px 0; }
 .esle-sec { display: flex; gap: 6px; align-items: center; }
 .esle-sec select { flex: 1; min-width: 0; }
 .ka-liste { max-height: 55vh; overflow: auto; margin: 10px 0; border: 1px solid var(--kenar, #e2e8f0); border-radius: 8px; }
+.ka-sira { display: flex; align-items: center; gap: 6px; padding-right: 8px; border-bottom: 1px solid var(--kenar, #e2e8f0); }
+.ka-sira .ka-satir { border-bottom: 0; flex: 1; }
 .ka-satir { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; padding: 8px 10px; background: none; border: 0; border-bottom: 1px solid var(--kenar, #e2e8f0); cursor: pointer; font: inherit; color: inherit; }
 .ka-satir:hover { background: var(--vurgu-acik, rgba(37,99,235,.08)); }

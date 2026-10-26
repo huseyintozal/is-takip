@@ -424,16 +424,17 @@ async function taramaYap() {
       <span class="etiket">${zaten.length} zaten bağlı</span><span class="soluk kucuk-yazi">${sonuc.klasorler.length} klasör tarandı</span></div>
     ${otomatik.length ? `<div><h4 class="esle-bas">Otomatik eşleşenler <span class="soluk kucuk-yazi">(yanlış olanın işaretini kaldırın)</span></h4>
       <table class="veri esle-tablo"><tbody>${otomatik.map((x, n) => `<tr><td><input type="checkbox" data-oto="${n}" checked></td>
-        <td><div class="ms">${esc(x.k.ad)}</div><div class="kucuk-yazi soluk">${esc(x.k.klasor)} · ${x.k.dosya} dosya, ${boyutYaz(x.k.boyut)}</div></td>
+        <td><div class="ms">${esc(x.k.ad)}</div><div class="kucuk-yazi soluk">${esc(x.k.klasor)} · ${x.k.dosya} dosya, ${boyutYaz(x.k.boyut)}</div></td><td><button class="dugme hayalet kucuk" data-ac="${esc(x.k.klasor)}" title="Klasörü bilgisayarda aç">${ikon('klasor')}Aç</button></td>
         <td>${ikon('esle')}</td><td><div class="ms">${esc(x.i.mal_sahibi || x.i.mahalle || '—')} (${esc(adaParsel(x.i))})</div><div class="kucuk-yazi soluk">${esc(isverenAdi(ik(x.i.isveren)))}</div></td></tr>`).join('')}</tbody></table></div>` : ''}
     ${isOneri.length ? `<div><h4 class="esle-bas">Klasörü bulunamayan işler (${isOneri.length}) <span class="soluk kucuk-yazi">— ★ en çok benzeyen klasörler; emin olduklarımı seçili getirdim (${isOneri.filter(x => x.secili !== null).length}), kontrol edin</span></h4>
       <table class="veri esle-tablo"><tbody>${isOneri.map((x, n) => `<tr>
         <td><div class="ms">${esc(x.i.mal_sahibi || x.i.mahalle || '—')} (${esc(adaParsel(x.i))})</div><div class="kucuk-yazi soluk">${esc(isverenAdi(ik(x.i.isveren)))} · ${esc(x.i.mahalle || '')}</div></td>
         <td style="width:52%"><div class="esle-sec"><select class="girdi ${x.secili !== null ? 'onerildi' : ''}" data-isesle="${n}">${klasorSecenek(x)}</select>
+          <button class="dugme hayalet kucuk" data-acsec="${n}" title="Seçili klasörü bilgisayarda aç">${ikon('klasor')}Aç</button>
           <button class="dugme hayalet kucuk" data-baska="${n}" title="Alt klasörler ve taşınmış klasörler dahil bütün klasörlerden seç">Başka klasör…</button></div></td></tr>`).join('')}</tbody></table></div>` : ''}
     ${elle.length ? `<details><summary class="esle-bas" style="cursor:pointer">İşle eşleşmeyen klasörler (${elle.length}) <span class="soluk kucuk-yazi">— isterseniz buradan da seçebilirsiniz</span></summary>
       <table class="veri esle-tablo"><tbody>${elle.map((x, n) => `<tr>
-        <td><div class="ms">${esc(x.k.ad)}</div><div class="kucuk-yazi soluk">${esc(x.k.klasor)} · ${x.k.dosya} dosya, ${boyutYaz(x.k.boyut)}</div></td>
+        <td><div class="ms">${esc(x.k.ad)}</div><div class="kucuk-yazi soluk">${esc(x.k.klasor)} · ${x.k.dosya} dosya, ${boyutYaz(x.k.boyut)}</div></td><td><button class="dugme hayalet kucuk" data-ac="${esc(x.k.klasor)}" title="Klasörü bilgisayarda aç">${ikon('klasor')}Aç</button></td>
         <td style="width:46%"><select class="girdi" data-elle="${n}">${secenekler(x.oneriler)}</select></td></tr>`).join('')}</tbody></table></details>` : ''}
     ${otomatik.length || elle.length || isOneri.length ? `<div class="esle-alt">
       <label class="secim"><input type="checkbox" id="esleBulut"> Eşleşen klasörlerdeki dosyaları buluta da yükle <span class="soluk" id="esleBoyut"></span></label>
@@ -448,6 +449,12 @@ async function taramaYap() {
     if ($('#esleBoyut')) $('#esleBoyut').textContent = `(${boyutYaz(t)}${DOSYA.kullanim !== null && DOSYA.kullanim + t > BULUT_SINIR ? ' — bulutta yer yetmez, sığmayanlar yalnızca bilgisayarda kalır' : ''})`;
   };
   $$('[data-oto], [data-elle], [data-isesle]', kutu).forEach(x => x.onchange = () => { x.classList.remove('onerildi'); boyutHesap(); }); boyutHesap();
+  $$('[data-ac]', kutu).forEach(d => d.onclick = () => klasoruAc(d.dataset.ac));
+  $$('[data-acsec]', kutu).forEach(d => d.onclick = () => {
+    const v = $(`[data-isesle="${d.dataset.acsec}"]`).value;
+    if (v === '') return hataGoster(new Error('Önce bir klasör seçin.'));
+    klasoruAc(uygun[+v].klasor);
+  });
   $$('[data-baska]', kutu).forEach(d => d.onclick = async () => {
     const x = isOneri[+d.dataset.baska];
     const k = await klasorAra(hepsi, `${x.i.mal_sahibi || x.i.mahalle || ''} ${x.i.ada || ''} ${x.i.parsel || ''}`);
@@ -460,6 +467,7 @@ async function taramaYap() {
   });
   if ($('#esleKaydet')) $('#esleKaydet').onclick = eslesmeKaydet;
 }
+function klasoruAc(klasor) { return yardimci('/ac', { json: { klasor } }).catch(hataGoster); }
 // Bütün taranan klasörlerde (alt ve taşınmış klasörler dahil) arayıp birini seçtirir
 function klasorAra(liste, ipucu) {
   return new Promise(coz => {
@@ -474,12 +482,15 @@ function klasorAra(liste, ipucu) {
     const ciz = () => {
       const t = katla(g.value).split(/\s+/).filter(Boolean);
       const s = liste.filter(k => { const a = katla(k.klasor); return t.every(x => a.includes(x)); }).slice(0, 200);
-      l.innerHTML = s.length ? s.map(k => `<button class="ka-satir" data-k="${esc(k.klasor)}"><b>${esc(k.ad)}</b><span class="kucuk-yazi soluk">${esc(k.klasor)} · ${k.dosya} dosya</span></button>`).join('') : '<div class="soluk" style="padding:8px">Bulunamadı.</div>';
+      l.innerHTML = s.length ? s.map(k => `<div class="ka-sira"><button class="ka-satir" data-k="${esc(k.klasor)}"><b>${esc(k.ad)}</b><span class="kucuk-yazi soluk">${esc(k.klasor)} · ${k.dosya} dosya</span></button>
+        <button class="dugme hayalet kucuk" data-ka-ac="${esc(k.klasor)}" title="Bilgisayarda aç">${ikon('klasor')}Aç</button></div>`).join('') : '<div class="soluk" style="padding:8px">Bulunamadı.</div>';
     };
     const bitir = k => { p.classList.add('gizli'); coz(k); };
-    g.oninput = ciz; ciz(); g.focus();
+    const ciz0 = ciz; g.oninput = () => { ciz0(); ikonlariDoldur(l); }; ciz0(); ikonlariDoldur(l); g.focus();
     g.onkeydown = e => { if (e.key === 'Escape') bitir(null); };
     p.onclick = e => {
+      const a = e.target.closest('[data-ka-ac]');
+      if (a) return klasoruAc(a.dataset.kaAc);
       const b = e.target.closest('[data-k]');
       if (b) return bitir(liste.find(k => k.klasor === b.dataset.k));
       if (e.target.dataset.c !== undefined || e.target === p) bitir(null);
