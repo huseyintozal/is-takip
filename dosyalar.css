@@ -34,3 +34,5 @@
   .dosya-kat.bos { padding: 2px 8px; }
   .dosya-katlar { gap: 4px; }
 }
+.esle-tablo select.onerildi { background: var(--yesil-z); border-color: #a6dcb9; }
+details > summary.esle-bas { margin: 8px 0; }

@@ -305,6 +305,22 @@ function eslesmeBul(klasor, isler) {
     .sort((a, b) => b.puan - a.puan);
   return { isler: puanli, ap };
 }
+/* Bir işin bir klasöre ne kadar benzediği: ada ve parsel numaraları + mal sahibi / işveren adları */
+function klasorPuani(i, k) {
+  const sayilar = (k.ad.match(/\d+/g) || []);
+  const ada = String(i.ada || '').trim(), pars = String(i.parsel || '').replace(/\s+/g, '');
+  const parselNo = (pars.match(/\d+/) || [''])[0];
+  let p = 0;
+  const ai = ada && ada !== '-' ? sayilar.indexOf(ada) : -1;
+  const pi = parselNo ? sayilar.lastIndexOf(parselNo) : -1;
+  if (ai >= 0 && pi >= 0 && pi !== ai) p += pi > ai ? 7 : 6;
+  else if (pi >= 0 && (!ada || ada === '-')) p += 4;
+  else if (ai >= 0 || pi >= 0) p += 1;
+  const kk = kelimeler(k.ad);
+  p += [...kelimeler(i.mal_sahibi)].filter(x => kk.has(x)).length * 2.5;
+  p += [...kelimeler(i.isveren)].filter(x => kk.has(x)).length;
+  return p;
+}
 let TARAMA = null;
 async function dosyalarSayfasi() {
   await yardimciDenetle(true);
@@ -380,7 +396,17 @@ async function taramaYap() {
     if (bos.length === 1 || (bos.length > 1 && bos[0].puan > bos[1].puan)) otomatik.push({ k, i: bos[0].i, puan: bos[0].puan });
     else elle.push({ k, oneriler: e.isler.map(x => x.i) });
   });
-  TARAMA = { otomatik, elle };
+  // klasörü olmayan işler için öneriler (iş tarafından eşleştirme)
+  const uygun = sonuc.klasorler.filter(k => !bagli.has(k.klasor) && !yoksay.includes(k.klasor) && (klasorAyristir(k.ad) || (k.dosya > 0 && k.alt === 0)));
+  const otoKlasor = new Set(otomatik.map(x => x.k.klasor)), otoIs = new Set(otomatik.map(x => x.i.id));
+  const isOneri = isler.filter(i => !i.klasor && !otoIs.has(i.id)).map(i => {
+    const adaylar = uygun.map((k, n) => ({ n, k, puan: klasorPuani(i, k) })).filter(x => x.puan >= 2).sort((a, b) => b.puan - a.puan).slice(0, 8);
+    const iyi = adaylar[0] && adaylar[0].puan >= 6 && !otoKlasor.has(adaylar[0].k.klasor) && (!adaylar[1] || adaylar[0].puan - adaylar[1].puan >= 2);
+    return { i, adaylar, secili: iyi ? adaylar[0].n : null };
+  }).sort((a, b) => (b.secili !== null) - (a.secili !== null) || (b.adaylar.length - a.adaylar.length));
+  TARAMA = { otomatik, elle, uygun, isOneri };
+  const klasorSecenek = x => `<option value="">— Klasör seçin —</option>${x.adaylar.map(a => `<option value="${a.n}" ${x.secili === a.n ? 'selected' : ''}>★ ${esc(a.k.ad)}</option>`).join('')}
+    <optgroup label="Bütün klasörler">${uygun.map((k, n) => `<option value="${n}">${esc(k.klasor)}</option>`).join('')}</optgroup>`;
   const secenekler = (oneriler) => {
     const sirali = [...oneriler, ...isler.filter(i => !oneriler.includes(i)).sort((a, b) => trSirala(ik(a.isveren), ik(b.isveren)) || trSirala(a.mal_sahibi || '', b.mal_sahibi || ''))];
     return '<option value="">— İş seçin —</option><option value="__yoksay">Bu klasörü yok say</option>' +
@@ -393,11 +419,15 @@ async function taramaYap() {
       <table class="veri esle-tablo"><tbody>${otomatik.map((x, n) => `<tr><td><input type="checkbox" data-oto="${n}" checked></td>
         <td><div class="ms">${esc(x.k.ad)}</div><div class="kucuk-yazi soluk">${esc(x.k.klasor)} · ${x.k.dosya} dosya, ${boyutYaz(x.k.boyut)}</div></td>
         <td>${ikon('esle')}</td><td><div class="ms">${esc(x.i.mal_sahibi || x.i.mahalle || '—')} (${esc(adaParsel(x.i))})</div><div class="kucuk-yazi soluk">${esc(isverenAdi(ik(x.i.isveren)))}</div></td></tr>`).join('')}</tbody></table></div>` : ''}
-    ${elle.length ? `<div><h4 class="esle-bas">Eşleşmeyenler <span class="soluk kucuk-yazi">(★ ada/parseli tutanlar)</span></h4>
+    ${isOneri.length ? `<div><h4 class="esle-bas">Klasörü bulunamayan işler (${isOneri.length}) <span class="soluk kucuk-yazi">— ★ en çok benzeyen klasörler; emin olduklarımı seçili getirdim (${isOneri.filter(x => x.secili !== null).length}), kontrol edin</span></h4>
+      <table class="veri esle-tablo"><tbody>${isOneri.map((x, n) => `<tr>
+        <td><div class="ms">${esc(x.i.mal_sahibi || x.i.mahalle || '—')} (${esc(adaParsel(x.i))})</div><div class="kucuk-yazi soluk">${esc(isverenAdi(ik(x.i.isveren)))} · ${esc(x.i.mahalle || '')}</div></td>
+        <td style="width:52%"><select class="girdi ${x.secili !== null ? 'onerildi' : ''}" data-isesle="${n}">${klasorSecenek(x)}</select></td></tr>`).join('')}</tbody></table></div>` : ''}
+    ${elle.length ? `<details><summary class="esle-bas" style="cursor:pointer">İşle eşleşmeyen klasörler (${elle.length}) <span class="soluk kucuk-yazi">— isterseniz buradan da seçebilirsiniz</span></summary>
       <table class="veri esle-tablo"><tbody>${elle.map((x, n) => `<tr>
         <td><div class="ms">${esc(x.k.ad)}</div><div class="kucuk-yazi soluk">${esc(x.k.klasor)} · ${x.k.dosya} dosya, ${boyutYaz(x.k.boyut)}</div></td>
-        <td style="width:46%"><select class="girdi" data-elle="${n}">${secenekler(x.oneriler)}</select></td></tr>`).join('')}</tbody></table></div>` : ''}
-    ${otomatik.length || elle.length ? `<div class="esle-alt">
+        <td style="width:46%"><select class="girdi" data-elle="${n}">${secenekler(x.oneriler)}</select></td></tr>`).join('')}</tbody></table></details>` : ''}
+    ${otomatik.length || elle.length || isOneri.length ? `<div class="esle-alt">
       <label class="secim"><input type="checkbox" id="esleBulut"> Eşleşen klasörlerdeki dosyaları buluta da yükle <span class="soluk" id="esleBoyut"></span></label>
       <button class="dugme ana" id="esleKaydet">${ikon('kaydet')}Eşleştirmeleri kaydet</button></div>` : '<div class="soluk">Eşleştirilecek yeni klasör yok.</div>'}
     <div id="esleSonuc"></div></div>`;
@@ -406,9 +436,10 @@ async function taramaYap() {
     let t = 0;
     otomatik.forEach((x, n) => { if ($(`[data-oto="${n}"]`).checked) t += x.k.boyut; });
     elle.forEach((x, n) => { const v = $(`[data-elle="${n}"]`).value; if (v && v !== '__yoksay') t += x.k.boyut; });
+    isOneri.forEach((x, n) => { const v = $(`[data-isesle="${n}"]`).value; if (v !== '') t += uygun[+v].boyut; });
     if ($('#esleBoyut')) $('#esleBoyut').textContent = `(${boyutYaz(t)}${DOSYA.kullanim !== null && DOSYA.kullanim + t > BULUT_SINIR ? ' — bulutta yer yetmez, sığmayanlar yalnızca bilgisayarda kalır' : ''})`;
   };
-  $$('[data-oto], [data-elle]', kutu).forEach(x => x.onchange = boyutHesap); boyutHesap();
+  $$('[data-oto], [data-elle], [data-isesle]', kutu).forEach(x => x.onchange = () => { x.classList.remove('onerildi'); boyutHesap(); }); boyutHesap();
   if ($('#esleKaydet')) $('#esleKaydet').onclick = eslesmeKaydet;
 }
 async function eslesmeKaydet() {
@@ -417,6 +448,11 @@ async function eslesmeKaydet() {
   TARAMA.otomatik.forEach((x, n) => { if ($(`[data-oto="${n}"]`).checked) ciftler.push({ k: x.k, isId: x.i.id }); });
   const yoksay = [];
   TARAMA.elle.forEach((x, n) => { const v = $(`[data-elle="${n}"]`).value; if (v === '__yoksay') yoksay.push(x.k.klasor); else if (v) ciftler.push({ k: x.k, isId: v }); });
+  TARAMA.isOneri.forEach((x, n) => { const v = $(`[data-isesle="${n}"]`).value; if (v !== '') ciftler.push({ k: TARAMA.uygun[+v], isId: x.i.id }); });
+  // aynı klasör ya da aynı iş iki kez seçildiyse ilkini al
+  const gorulenK = new Set(), gorulenI = new Set();
+  const tekil = ciftler.filter(c => { if (gorulenK.has(c.k.klasor) || gorulenI.has(c.isId)) return false; gorulenK.add(c.k.klasor); gorulenI.add(c.isId); return true; });
+  ciftler.length = 0; ciftler.push(...tekil);
   try { const eski = JSON.parse(localStorage.getItem('isTakip.yoksayKlasor') || '[]'); localStorage.setItem('isTakip.yoksayKlasor', JSON.stringify([...eski, ...yoksay])); } catch (e) { /* */ }
   const bulut = $('#esleBulut').checked;
   const sonuc = $('#esleSonuc');
