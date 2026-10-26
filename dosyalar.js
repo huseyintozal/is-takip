@@ -512,7 +512,8 @@ async function taramaYap() {
   };
   kutu.innerHTML = `<div class="yigin">
     <div class="ozet-cubugu"><span class="etiket yesil">${otomatik.length} otomatik eşleşti</span><span class="etiket sari">${elle.length} sizin seçmeniz gerekiyor</span>
-      <span class="etiket">${zaten.length} zaten bağlı</span><span class="soluk kucuk-yazi">${sonuc.klasorler.length} klasör tarandı</span></div>
+      <span class="etiket">${zaten.length} klasör zaten bağlı</span><span class="soluk kucuk-yazi">${sonuc.klasorler.length} klasör tarandı</span>
+      <span class="etiket ${isler.every(i => i.klasor) ? 'yesil' : ''}" title="Dışarıdan ya da Başka klasör… ile seçilen klasörler taramada görünmez ama bağlıdır">${isler.length} işin ${isler.filter(i => i.klasor).length}'inin klasörü var</span></div>
     ${otomatik.length ? `<div><h4 class="esle-bas">Otomatik eşleşenler <span class="soluk kucuk-yazi">(yanlış olanın işaretini kaldırın)</span></h4>
       <table class="veri esle-tablo"><tbody>${otomatik.map((x, n) => `<tr><td><input type="checkbox" data-oto="${n}" checked></td>
         <td><div class="ms">${esc(x.k.ad)}</div><div class="kucuk-yazi soluk">${esc(x.k.klasor)} · ${x.k.dosya} dosya, ${boyutYaz(x.k.boyut)}</div></td><td><button class="dugme hayalet kucuk" data-ac="${esc(x.k.klasor)}" title="Klasörü bilgisayarda aç">${ikon('klasor')}Aç</button></td>
