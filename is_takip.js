@@ -30,7 +30,9 @@ const saltOkunur = () => !!(D.durum && D.durum.salt_okunur);
 
 // ------------------------------------------------------------------ durum
 const IT = { isler: null, projeler: null, firmalar: null, form: null, degisti: false, kopyalar: [] };
-const DURUM_ALANLARI = ['mimari', 'evrak', 'zemin_degeri', 'geo', 'sondaj', 'sondaja_atildi', 'laba_atildi', 'lab', 'riskli_rapor'];
+const DURUM_ALANLARI = ['mimari', 'evrak', 'zemin_degeri', 'geo', 'sondaj', 'sondaja_atildi', 'laba_atildi', 'lab', 'riskli_rapor', 'rapor_yazildi', 'imza_cd', 'lab_taramasi'];
+/* Tamamlanan işin (lab sonucu geldikten sonra) kapanış adımları, bu sırayla */
+const BITIS_ALANLARI = ['rapor_yazildi', 'imza_cd', 'lab_taramasi'];
 const ALAN = {
   mimari:       { ad: 'Mimari',       kisa: 'Mimari', soru: 'Mimari proje geldi mi?',               e: 'Var',     h: 'Yok', ornek: '3.20 İNECEK' },
   evrak:        { ad: 'Evrak',        kisa: 'Evrak',  soru: 'Evraklar geldi mi?',                   e: 'Var',     h: 'Yok', ornek: 'TAPU EKSİK' },
@@ -42,6 +44,9 @@ const ALAN = {
   laba_atildi:  { ad: 'Laba atıldı',  kisa: 'Laba',   soru: 'Numuneler laboratuvara gönderildi mi?', e: 'Atıldı',  h: 'Atılmadı', ornek: 'NİHAT ABİ' },
   lab:          { ad: 'Lab sonucu',   kisa: 'Lab',    soru: 'Laboratuvar sonuçları geldi mi?',      e: 'Geldi',   h: 'Gelmedi', ornek: 'PAZARTESİ GELİR' },
   riskli_rapor: { ad: 'Riskli rapor', kisa: 'Riskli', soru: 'Bilgi amaçlı, iş akışını etkilemez',  e: 'Var',     h: 'Yok', ornek: '(ZC BİZ ZD)' },
+  rapor_yazildi: { ad: 'Rapor yazıldı', kisa: 'Rapor',  soru: 'Lab sonucundan sonra rapor yazıldı mı?', e: 'Yazıldı', h: 'Yazılmadı', ornek: 'KONTROLDE' },
+  imza_cd:       { ad: 'İmza-CD',       kisa: 'İmza-CD', soru: 'İmzalar atıldı, CD hazırlandı mı?',  e: 'Tamam',   h: 'Bekliyor',  ornek: 'MÜH. İMZASI EKSİK' },
+  lab_taramasi:  { ad: 'Lab taraması',  kisa: 'Tarama', soru: 'Lab föyleri tarandı mı?',             e: 'Tarandı', h: 'Taranmadı', ornek: '' },
 };
 const KIMDE = {
   musteri: { ad: 'Müşteriden bekleniyor', renk: 'sari',    ikon: 'musteri' },
@@ -64,6 +69,11 @@ const SUZGECLER = {
   me:      { ad: 'Mimari / evrak bekleyenler', f: (i, d) => d.zdIcin },
   zd:      { ad: 'Zemin değeri verilecekler', f: (i, d) => d.biz.includes('zd') },
   labat:   { ad: 'Laba atılacaklar',          f: (i, d) => d.biz.includes('lab_at') },
+  // Tamamlananlar (lab sonucu gelmiş işler) içinde kapanış adımları
+  rapor:   { grup: 'tamam', ad: 'Rapor yazılacaklar',       f: (i, d) => d.kimde[0] === 'tamam' && !i.rapor_yazildi },
+  imza:    { grup: 'tamam', ad: 'İmza-CD bekleyenler',      f: (i, d) => d.kimde[0] === 'tamam' && !i.imza_cd },
+  tarama:  { grup: 'tamam', ad: 'Lab taraması bekleyenler', f: (i, d) => d.kimde[0] === 'tamam' && !i.lab_taramasi },
+  bitti:   { grup: 'tamam', ad: 'Tamamen bitenler',          f: (i, d) => d.bitti },
 };
 
 /* İş akışı:  mimari + evrak → zemin değeri (biz) → geo (müşteri) → bina yıkıldı (müşteri bildirir)
@@ -101,6 +111,8 @@ function isDurumu(i) {
   if (d.sondajBekliyor) d.kimde.push('sondaj');
   if (d.labBekliyor) d.kimde.push('lab');
   if (!d.kimde.length) d.kimde.push('tamam');
+  d.bitisEksik = d.kimde[0] === 'tamam' ? BITIS_ALANLARI.filter(a => !i[a]) : [];
+  d.bitti = d.kimde[0] === 'tamam' && !d.bitisEksik.length;
   d.asama = asama(i, d);
   return d;
 }
@@ -111,7 +123,11 @@ function bekleniyor(liste) {          // ['mimari'] -> "Mimari bekleniyor", ['ev
 }
 function asama(i, d) {
   const A = (sira, ad, kimde) => ({ sira, ad, kimde, renk: KIMDE[kimde].renk });
-  if (d.kimde[0] === 'tamam') return A(9, 'Tamamlandı', 'tamam');
+  if (d.kimde[0] === 'tamam') {
+    if (d.bitti) return A(9.9, 'Tamamlandı', 'tamam');
+    const ilk = d.bitisEksik[0];
+    return A(9 + BITIS_ALANLARI.indexOf(ilk) / 10, { rapor_yazildi: 'Rapor yazılacak', imza_cd: 'İmza-CD bekliyor', lab_taramasi: 'Lab taraması bekliyor' }[ilk], 'tamam');
+  }
   if (!i.zemin_degeri) {
     if (d.zdIcin) return A(1, bekleniyor(d.istenen), 'musteri');
     if (d.biz.includes('sondaj')) return A(5, 'Sondaj yapılacak', 'biz');
@@ -268,7 +284,8 @@ async function islerSayfasi(isveren) {
         <div class="ara">${ikon('ara')}<input class="girdi" id="ara" placeholder="Mal sahibi, mahalle, ada, parsel ya da not ara" value="${esc(s.ara)}"></div>
         <select class="girdi" id="kimde"><option value="">Bütün durumlar</option>
           <optgroup label="Kimde bekliyor">${Object.entries(KIMDE).map(([k, v]) => `<option value="${k}" ${s.kimde === k ? 'selected' : ''}>${v.ad} (${say[k]})</option>`).join('')}</optgroup>
-          <optgroup label="Aşama">${Object.entries(SUZGECLER).map(([k, v]) => `<option value="${k}" ${s.kimde === k ? 'selected' : ''}>${v.ad} (${fSay[k] || 0})</option>`).join('')}</optgroup></select>
+          <optgroup label="Aşama">${Object.entries(SUZGECLER).filter(([, v]) => !v.grup).map(([k, v]) => `<option value="${k}" ${s.kimde === k ? 'selected' : ''}>${v.ad} (${fSay[k] || 0})</option>`).join('')}</optgroup>
+          <optgroup label="Tamamlananlar">${Object.entries(SUZGECLER).filter(([, v]) => v.grup === 'tamam').map(([k, v]) => `<option value="${k}" ${s.kimde === k ? 'selected' : ''}>${v.ad} (${fSay[k] || 0})</option>`).join('')}</optgroup></select>
         <select class="girdi" id="sira">
           ${[['isveren', 'İşverene göre'], ['asama', 'İş akışı aşamasına göre'], ['guncel', 'Son güncellenen üstte'], ['ada', 'Ada / parsele göre']]
             .map(([k, v]) => `<option value="${k}" ${s.sira === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
@@ -316,6 +333,7 @@ function hucre(i, alan, d) {
   const beklenen = {          // eksikse kırmızı görünsün mü? (henüz sırası gelmeyen adım gri kalır)
     mimari: true, evrak: true, zemin_degeri: i.mimari && i.evrak, geo: i.zemin_degeri, sondaj: i.bina_yikildi === 'evet',
     laba_atildi: i.sondaj, lab: i.laba_atildi, riskli_rapor: false,
+    rapor_yazildi: d.kimde[0] === 'tamam', imza_cd: d.kimde[0] === 'tamam', lab_taramasi: d.kimde[0] === 'tamam',
   }[alan];
   const bosHucre = !i[alan] && (i.bos_alanlar || []).includes(alan);     // Excel'de boş bırakılmış
   const sinif = i[alan] ? 'var' : beklenen && !bosHucre ? 'yok' : 'bos';
@@ -330,7 +348,7 @@ function notSatirlari(i) {          // Excel'de hücreye yazılan yazılar, ayne
 }
 const SONDAJ_DEGER = { yok: { sondaj: false, sondaja_atildi: false }, atildi: { sondaj: false, sondaja_atildi: true }, yapildi: { sondaj: true, sondaja_atildi: false } };
 const SONDAJ_YAZI = { yok: 'Yapılmadı', atildi: 'Sondaja atıldı', yapildi: 'Yapıldı' };
-const SUTUNLAR = ['mimari', 'evrak', 'zemin_degeri', 'geo', 'bina_yikildi', 'sondaj', 'laba_atildi', 'lab', 'riskli_rapor'];
+const SUTUNLAR = ['mimari', 'evrak', 'zemin_degeri', 'geo', 'bina_yikildi', 'sondaj', 'laba_atildi', 'lab', 'riskli_rapor', 'rapor_yazildi', 'imza_cd', 'lab_taramasi'];
 
 function tabloCiz(isveren) {
   const s = suzgec();
@@ -338,7 +356,7 @@ function tabloCiz(isveren) {
   let liste = IT.isler.filter(i => !isveren || ik(i.isveren) === isveren).map(i => ({ i, d: isDurumu(i) }));
   if (SUZGECLER[s.kimde]) liste = liste.filter(x => SUZGECLER[s.kimde].f(x.i, x.d));
   else if (KIMDE[s.kimde]) liste = liste.filter(x => x.d.kimde.includes(s.kimde));
-  else if (s.gizle) liste = liste.filter(x => x.d.kimde[0] !== 'tamam');
+  else if (s.gizle) liste = liste.filter(x => !x.d.bitti);          // rapor/imza/tarama bekleyenler görünmeye devam eder
   if (q) liste = liste.filter(({ i }) => katla([i.mal_sahibi, i.mahalle, i.ada, i.parsel, `${i.ada}/${i.parsel}`, i.isveren, i.notlar, ...Object.values(i.alan_notlari || {})].join(' ')).includes(q));
   const ap = i => [parseInt(i.ada) || 0, parseInt(i.parsel) || 0];
   const sira = {
@@ -359,8 +377,8 @@ function tabloCiz(isveren) {
       <th>Durum</th></tr></thead><tbody>
     ${liste.map(({ i, d }) => {
       const m = isMesajlari(i, d);
-      return `<tr data-id="${esc(i.id)}" class="${d.kimde[0] === 'tamam' ? 'tamam' : ''}">
-        <td class="h-ms"><div class="ms">${esc(i.mal_sahibi || '—')}</div><div class="ms-alt">${esc(i.mahalle || '')}</div>${notSatirlari(i)}</td>
+      return `<tr data-id="${esc(i.id)}" class="${d.bitti ? 'tamam' : ''}">
+        <td class="h-ms"><div class="ms">${esc(i.mal_sahibi || '—')}</div><div class="ms-alt">${esc(i.mahalle || '')}${istemci().dosyaRozeti ? istemci().dosyaRozeti(i) : ''}</div>${notSatirlari(i)}</td>
         <td class="h-ap" style="white-space:nowrap">${esc(adaParsel(i))}</td>
         ${isveren ? '' : `<td class="kucuk-yazi h-isv">${esc(i.isveren)}</td>`}
         ${SUTUNLAR.map(a => `<td class="o" data-k="${esc(ALAN[a].kisa)}">${hucre(i, a, d)}</td>`).join('')}
@@ -471,7 +489,7 @@ async function isAra() {
   try { await islerYukle(); } catch (e) { return hataGoster(e); }
   const p = $('#perde');
   p.innerHTML = `<div class="pencere ara-pencere">
-    <div class="ara-girdi">${ikon('ara')}<input class="girdi" id="isAraGirdi" placeholder="Mal sahibi, ada/parsel (örn. 2163/10), mahalle, işveren ya da not" autocomplete="off"></div>
+    <div class="ara-girdi">${ikon('ara')}<input class="girdi" id="isAraGirdi" type="search" name="is_arama" enterkeyhint="search" placeholder="Mal sahibi, ada/parsel (örn. 2163/10), mahalle, işveren ya da not" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></div>
     <div class="ara-sonuc" id="isAraSonuc"><div class="ara-bos">Yazmaya başlayın. ${IT.isler.length} iş içinde, süzgeçlerden bağımsız aranır.</div></div>
     <div class="ara-alt"><span>↑ ↓ seç · Enter aç · Esc kapat</span></div></div>`;
   ikonlariDoldur(p);
@@ -590,6 +608,7 @@ async function isSayfasi(iid, onIsveren) {
   if (!yeni) { const ak = $('#durumlar').closest('.kart'); ak.parentNode.prepend(ak); }   // kayıtlı işte önce iş akışı
   durumlariCiz();
   ozetCiz();
+  if (istemci().isSayfasiSonra) istemci().isSayfasiSonra(kayit, yeni);      // bulutta: dosyalar kartı
   $$('[data-a]').forEach(g => {
     g.oninput = g.onchange = () => { if (IT.form !== f) return; f[g.dataset.a] = g.value; IT.degisti = true; ozetCiz(); };
   });
@@ -634,7 +653,7 @@ function durumlariCiz() {
       <input class="girdi alan-not" data-not="${a}" value="${esc((f.alan_notlari || {})[a] || '')}" placeholder="Not yaz (örn. ${esc(t.ornek || 'İYİLEŞTİRME ÇIKABİLİR')})">
       <div class="secenekler">${secenek}</div></div>`;
   };
-  $('#durumlar').innerHTML = ['mimari', 'evrak', 'zemin_degeri', 'geo', 'bina_yikildi', 'sondaj', 'laba_atildi', 'lab', 'riskli_rapor'].map(satir).join('');
+  $('#durumlar').innerHTML = ['mimari', 'evrak', 'zemin_degeri', 'geo', 'bina_yikildi', 'sondaj', 'laba_atildi', 'lab', 'riskli_rapor', ...BITIS_ALANLARI].map(satir).join('');
   ikonlariDoldur($('#durumlar'));
   $$('#durumlar [data-not]').forEach(g => g.oninput = () => {
     if (IT.form !== f) return;
@@ -661,6 +680,7 @@ function adimCubugu(i) {
     ['Geo', 'Müşteriden', i.geo],
     ['Sondaj', i.sondaja_atildi && !i.sondaj ? 'Sondaja atıldı' : binaYikik(i) ? 'Bina yıkıldı' : 'Bina yıkılınca', i.sondaj],
     ['Lab', i.laba_atildi ? 'Laboratuvarda' : 'Laba gönderilir', i.laba_atildi && i.lab],
+    ['Rapor ve teslim', BITIS_ALANLARI.filter(a => i[a]).length + '/3 · rapor, imza-CD, tarama', BITIS_ALANLARI.every(a => i[a])],
   ];
   const etkin = A.findIndex(x => !x[2]);
   return A.map(([ad, alt, tamam], n) => `<div class="adim ${tamam ? 'tamam' : ''} ${n === etkin ? 'etkin' : ''}">
@@ -687,7 +707,8 @@ function ozetCiz() {
   };
   $('#sonraki').innerHTML = m.length
     ? grup('musteri', 'Müşteriye yazılacak', 'musteri') + grup('sondaj', 'Sondajcıdan', 'saat') + grup('lab', 'Laboratuvardan', 'deney') + grup('biz', 'Bizde', 'el')
-    : `<div class="mesaj tamam"><div class="m">Bütün adımlar tamam. Lab sonuçları geldi, rapora geçilebilir.</div></div>`;
+    : d.bitti ? `<div class="mesaj tamam"><div class="m">İş tamamen bitti: rapor yazıldı, imza-CD ve lab taraması tamam.</div></div>`
+    : `<div class="mesaj-grup"><h4>${ikon('el')}Kapanış</h4>${d.bitisEksik.map(a => `<div class="mesaj biz"><div class="m">${esc(kimlik(f))} ${esc({ rapor_yazildi: 'rapor yazılacak', imza_cd: 'imza-CD bekliyor', lab_taramasi: 'lab taraması yapılacak' }[a])}</div></div>`).join('')}</div>`;
   ikonlariDoldur($('#sonraki'));
 }
 

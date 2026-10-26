@@ -1,0 +1,26 @@
+/* İş Takibi — mali takip (yalnızca stil.css değişkenleri) */
+.mali-kutular { grid-template-columns: repeat(4, 1fr); }
+.mali-kutular .sayi { font-size: 19px; }
+.ozet-kutu .simge.kirmizi { background: var(--kirmizi-z); color: var(--kirmizi); }
+.mali-kutular .ozet-kutu { cursor: default; }
+.mali-kutular .ozet-kutu:hover { border-color: var(--cizgi); box-shadow: var(--golge); }
+.mali-sekme { display: flex; width: max-content; max-width: 100%; overflow-x: auto; }
+.mali-sekme button { height: 32px; }
+table.mali-tablo td { padding: 8px 10px; vertical-align: middle; }
+table.mali-tablo th { padding: 9px 10px; }
+table.mali-tablo .sag { text-align: right; white-space: nowrap; }
+table.mali-tablo tfoot td { background: var(--yuzey2); border-top: 1px solid var(--cizgi); }
+table.mali-tablo tr.soluk td { color: var(--soluk); }
+.fiyat-girdi { height: 32px; text-align: right; }
+.fiyat-girdi.ozel, .mali-is .girdi.ozel { background: var(--vurgu-acik); border-color: #b9d9d5; font-weight: 600; }
+.fiyat-girdi::placeholder { color: var(--soluk); }
+.mali-form { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.mali-form .girdi { width: auto; flex: 1 1 160px; }
+.mali-form .alan { flex: 1 1 180px; }
+.mali-liste li { padding: 9px 16px; }
+.mali-ikili { display: grid; grid-template-columns: 1fr 120px; gap: 8px; }
+.mali-net { padding: 8px 10px; background: var(--yuzey2); border-radius: 8px; border: 1px solid var(--cizgi2); color: var(--metin2); }
+@media (max-width: 900px) {
+  .mali-kutular, .mali-kutular[style] { grid-template-columns: repeat(2, 1fr) !important; }
+  .mali-kutular .sayi { font-size: 16px; }
+}

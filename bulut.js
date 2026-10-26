@@ -5,7 +5,7 @@
  *  - is_takip.js'in çağırdığı api('GET', 'is_takip/isler') gibi istekler burada Supabase'e çevrilir,
  *    böylece arayüz kodu masaüstü sürümüyle aynı kalır. */
 
-const WEB_SURUM = 'B1.0.0';
+const WEB_SURUM = 'B1.3.0';
 const D = { durum: null, firmalar: null };
 const BULUT = { sb: null, eposta: '', rol: '', isler: new Map(), canli: 'bekliyor', tazeleZaman: null, bekleyenTazele: false };
 
@@ -85,6 +85,7 @@ async function api(yontem, yol, govde) {
     }
     if (yontem === 'PUT' || yontem === 'PATCH') return isGuncelleBulut(id, govde || {});
     if (yontem === 'DELETE') {
+      if (window.dosyaIsSilindi) await dosyaIsSilindi(id);          // buluttaki dosyaları da sil
       const { error } = await BULUT.sb.from('isler').delete().eq('id', id);
       if (error) throw sbHata(error);
       BULUT.isler.delete(id);
@@ -143,7 +144,7 @@ window.ISTEMCI = {
   kenarEk() {
     const r = { canli: ['#4ade80', 'Canlı'], bekliyor: ['#fbbf24', 'Bağlanıyor'], kapali: ['#f87171', 'Bağlantı yok'] }[navigator.onLine ? BULUT.canli : 'kapali'];
     return `<div style="margin-top:6px"><span style="display:inline-block;width:8px;height:8px;border-radius:99px;background:${r[0]};margin-right:6px"></span>${r[1]}</div>
-      <div style="margin-top:4px;word-break:break-all">${esc(BULUT.eposta)}</div>`;
+      <div style="margin-top:4px;word-break:break-all">${esc(BULUT.eposta)}</div>${window.dosyaKenar ? dosyaKenar() : ''}`;
   },
   async iceAktar(dosya, guncelle, sayfa) {
     const buf = await dosya.arrayBuffer();
@@ -328,6 +329,8 @@ async function oturumAc(oturum) {
   BULUT.rol = data.rol;
   D.durum = { surum: WEB_SURUM, tek_basina: true, bulut: true, salt_okunur: data.rol === 'goruntule', rol: data.rol, eposta: BULUT.eposta };
   try { await isleriIndir(); } catch (e) { return hataGoster(e); }
+  if (window.dosyaOturum) { try { await dosyaOturum(); } catch (e) { console.error(e); } }
+  if (window.maliOturum) { try { await maliOturum(); } catch (e) { console.error(e); } }
   IT.isler = null;
   document.body.classList.remove('girisli-degil');
   $('#giris').innerHTML = '';
@@ -416,6 +419,8 @@ async function git() {
   $$('.menu a').forEach(a => a.classList.toggle('etkin', a.dataset.sayfa === etkin));
   try {
     if (sayfa === 'hesap') return hesapSayfasi();
+    if (sayfa === 'dosyalar' && window.dosyalarSayfasi) return await dosyalarSayfasi();
+    if (sayfa === 'mali' && window.maliSayfasi) return await maliSayfasi(rest);
     if (sayfa === 'kullanicilar') return await kullanicilarSayfasi();
     if (await isTakipYonlendir(sayfa, rest)) return;
     location.hash = '#/isler';
@@ -436,6 +441,8 @@ document.addEventListener('visibilitychange', () => {       // telefon uykudan d
 window.addEventListener('DOMContentLoaded', async () => {
   ikonlariDoldur();
   $('#menuAc').onclick = () => document.body.classList.toggle('menu-acik');
+  // telefonda menüden "İş ara" seçilince menü kapansın, arama penceresi önde kalsın
+  document.addEventListener('click', e => { if (e.target.closest('[data-is-ara]')) document.body.classList.remove('menu-acik'); }, true);
   $('#menuPerde').onclick = () => document.body.classList.remove('menu-acik');
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     navigator.serviceWorker.register('sw.js').catch(() => {});

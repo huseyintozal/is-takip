@@ -54,7 +54,10 @@ body.girisli-degil .uygulama, body.girisli-degil .mobil-ust { display: none !imp
   .kul-form { grid-template-columns: 1fr; }
   .bildirimler { left: 12px; right: 12px; top: calc(env(safe-area-inset-top) + 64px); }
   .bildirim { max-width: none; }
+  .perde { z-index: 60; align-items: start; }
   .pencere.ara-pencere { margin-top: calc(env(safe-area-inset-top) + 8px); }
+  .ara-girdi .girdi { -webkit-appearance: none; appearance: none; }
+  .ara-alt { display: none; }
   .ara-sonuc { max-height: 60dvh; }
   .rapor-bolum .kart-bas { flex-wrap: wrap; }
 }

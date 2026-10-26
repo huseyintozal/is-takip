@@ -1,0 +1,36 @@
+/* İş Takibi — dosyalar (yalnızca stil.css değişkenleri) */
+.dosya-bilgi { padding: 10px 18px; border-bottom: 1px solid var(--cizgi2); color: var(--metin2); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.dosya-bilgi i { width: 15px; height: 15px; color: var(--soluk); }
+.dosya-katlar { padding: 10px 12px 14px; display: grid; gap: 8px; }
+.dosya-kat { border: 1.5px dashed transparent; border-radius: 9px; padding: 6px 8px; transition: .12s; }
+.dosya-kat.bos { border-color: var(--cizgi2); }
+.dosya-kat.uzerinde { border-color: var(--vurgu); background: var(--vurgu-acik); }
+.dosya-kat-bas { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+.dosya-kat-bas b { font-weight: 600; font-size: 13.5px; }
+.dosya-kat-bas .dugme { margin-left: auto; }
+.dosya-kat-ipucu { font-size: 12px; color: var(--soluk); padding: 0 0 4px; }
+.dosya-kat .liste li { padding: 7px 2px; }
+.dosya-kat .liste .ad a { color: var(--metin); font-weight: 560; }
+.dosya-kat .liste .ad a:hover { color: var(--vurgu); text-decoration: underline; }
+.dosya-kat .etiket i { width: 12px; height: 12px; }
+.dosya-kat .kucuk-yazi .etiket { font-size: 11px; padding: 1px 6px; margin-left: 4px; vertical-align: 1px; }
+.dosya-satir[draggable="true"] { cursor: grab; }
+.dosya-ikon.jpg, .dosya-ikon.jpeg, .dosya-ikon.png { background: #eef6ff; color: #1d4ed8; }
+.dosya-rozet { color: var(--vurgu); font-weight: 600; white-space: nowrap; }
+.kullanim { height: 10px; border-radius: 99px; background: var(--cizgi2); overflow: hidden; }
+.kullanim div { height: 100%; background: var(--vurgu); border-radius: 99px; }
+.kullanim div.dolu { background: var(--kirmizi); }
+.esle-bas { margin: 4px 0 8px; font-size: 13.5px; }
+.esle-tablo td { padding: 7px 6px; vertical-align: middle; }
+.esle-tablo td i { width: 16px; height: 16px; color: var(--soluk); }
+.esle-tablo .ms { font-weight: 600; }
+.esle-alt { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: space-between; padding-top: 6px; border-top: 1px solid var(--cizgi2); }
+@media (max-width: 700px) {
+  .esle-tablo tr { display: grid; grid-template-columns: 1fr; }
+  .esle-tablo td { width: auto !important; }
+}
+@media (max-width: 900px) {
+  .dosya-kat-ipucu { display: none; }
+  .dosya-kat.bos { padding: 2px 8px; }
+  .dosya-katlar { gap: 4px; }
+}
