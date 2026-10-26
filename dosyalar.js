@@ -199,6 +199,20 @@ async function bulutaKoy(isId, blob, ad) {
   if (DOSYA.kullanim !== null) DOSYA.kullanim += blob.size;
   return { yol: anahtar };
 }
+/* Sürükle-bırak: klasör bırakılırsa içindeki bütün dosyaları (alt klasörler dahil) toplar */
+function birakilanDosyalar(dt) {
+  const girdiler = [...(dt.items || [])].filter(x => x.kind === 'file').map(x => x.webkitGetAsEntry && x.webkitGetAsEntry()).filter(Boolean);
+  if (!girdiler.length) return Promise.resolve([...dt.files]);       // eski tarayıcı
+  const dosya = g => new Promise((coz, red) => g.file(coz, red));
+  const oku = okuyucu => new Promise((coz, red) => okuyucu.readEntries(coz, red));
+  async function topla(g, cikti) {
+    if (g.isFile) { const f = await dosya(g); if (!/^(~\$|\.istakip$|thumbs\.db$|desktop\.ini$)/i.test(f.name)) cikti.push(f); return; }
+    if (!g.isDirectory) return;
+    const okuyucu = g.createReader();
+    for (;;) { const parca = await oku(okuyucu); if (!parca.length) break; for (const x of parca) await topla(x, cikti); }
+  }
+  return (async () => { const cikti = []; for (const g of girdiler) await topla(g, cikti); return cikti; })();
+}
 /* Dosyaları işe ekler: bilgisayara (yardımcı varsa) + buluta (açıksa ve yer varsa) */
 async function dosyaEkle(isId, kategori, dosyalar) {
   if (saltOkunur()) return bildir('Yalnızca görüntüleme yetkiniz var', 'hata');
@@ -371,7 +385,11 @@ function dosyaKartiCiz(isId) {
       e.preventDefault(); e.stopPropagation(); kat.classList.remove('uzerinde');
       const tasinan = e.dataTransfer.getData('text/is-dosya');
       if (tasinan) return dosyaKategori(tasinan, kat.dataset.kat);           // dosyayı başka bölüme taşı
-      dosyaEkle(isId, kat.dataset.kat, [...e.dataTransfer.files]);
+      const kategori = kat.dataset.kat;
+      birakilanDosyalar(e.dataTransfer).then(l => {
+        if (!l.length) return bildir('Bırakılan klasörde dosya yok', 'hata');
+        dosyaEkle(isId, kategori, l);
+      }).catch(hataGoster);
     };
   });
 }
