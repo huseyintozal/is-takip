@@ -388,6 +388,7 @@ async function taramaYap() {
   // Yalnızca ANA proje klasörleri: kök ya da durum klasörlerinin (0-1 YAZIMA HAZIR RAPORLAR gibi) hemen altındakiler.
   // Proje klasörlerinin içindeki alt klasörler (MİMARİ, FOTO…) hiç gösterilmez.
   const tumu = new Map(sonuc.klasorler.map(k => [k.klasor, k]));
+  const hepsi = sonuc.klasorler.filter(k => !bagli.has(k.klasor));
   const grupMu = k => !bagli.has(k.klasor) && k.dosya === 0 && !(klasorAyristir(k.ad) || {}).ada &&
     (k.alt >= 8 || /^\d+\s*[-.)_]/.test(k.ad) || /RAPORLAR|BEKLEYEN|HAZIR|TAMAMLAN|ARŞ[İI]V|B[İI]TEN|[İI]ŞLER|PROJELER|ZEM[İI]N ET[ÜU]T/i.test(k.ad));
   const ustler = yol => { const p = yol.split('/'); return p.slice(0, -1).map((_, n) => p.slice(0, n + 1).join('/')); };
@@ -410,7 +411,7 @@ async function taramaYap() {
     const iyi = adaylar[0] && adaylar[0].puan >= 6 && !otoKlasor.has(adaylar[0].k.klasor) && (!adaylar[1] || adaylar[0].puan - adaylar[1].puan >= 2);
     return { i, adaylar, secili: iyi ? adaylar[0].n : null };
   }).sort((a, b) => (b.secili !== null) - (a.secili !== null) || (b.adaylar.length - a.adaylar.length));
-  TARAMA = { otomatik, elle, uygun, isOneri };
+  TARAMA = { otomatik, elle, uygun, isOneri, hepsi };
   const klasorSecenek = x => `<option value="">— Klasör seçin —</option>${x.adaylar.map(a => `<option value="${a.n}" ${x.secili === a.n ? 'selected' : ''}>★ ${esc(a.k.ad)}</option>`).join('')}
     <optgroup label="Bütün klasörler">${uygun.map((k, n) => `<option value="${n}">${esc(k.klasor)}</option>`).join('')}</optgroup>`;
   const secenekler = (oneriler) => {
@@ -428,7 +429,8 @@ async function taramaYap() {
     ${isOneri.length ? `<div><h4 class="esle-bas">Klasörü bulunamayan işler (${isOneri.length}) <span class="soluk kucuk-yazi">— ★ en çok benzeyen klasörler; emin olduklarımı seçili getirdim (${isOneri.filter(x => x.secili !== null).length}), kontrol edin</span></h4>
       <table class="veri esle-tablo"><tbody>${isOneri.map((x, n) => `<tr>
         <td><div class="ms">${esc(x.i.mal_sahibi || x.i.mahalle || '—')} (${esc(adaParsel(x.i))})</div><div class="kucuk-yazi soluk">${esc(isverenAdi(ik(x.i.isveren)))} · ${esc(x.i.mahalle || '')}</div></td>
-        <td style="width:52%"><select class="girdi ${x.secili !== null ? 'onerildi' : ''}" data-isesle="${n}">${klasorSecenek(x)}</select></td></tr>`).join('')}</tbody></table></div>` : ''}
+        <td style="width:52%"><div class="esle-sec"><select class="girdi ${x.secili !== null ? 'onerildi' : ''}" data-isesle="${n}">${klasorSecenek(x)}</select>
+          <button class="dugme hayalet kucuk" data-baska="${n}" title="Alt klasörler ve taşınmış klasörler dahil bütün klasörlerden seç">Başka klasör…</button></div></td></tr>`).join('')}</tbody></table></div>` : ''}
     ${elle.length ? `<details><summary class="esle-bas" style="cursor:pointer">İşle eşleşmeyen klasörler (${elle.length}) <span class="soluk kucuk-yazi">— isterseniz buradan da seçebilirsiniz</span></summary>
       <table class="veri esle-tablo"><tbody>${elle.map((x, n) => `<tr>
         <td><div class="ms">${esc(x.k.ad)}</div><div class="kucuk-yazi soluk">${esc(x.k.klasor)} · ${x.k.dosya} dosya, ${boyutYaz(x.k.boyut)}</div></td>
@@ -446,7 +448,43 @@ async function taramaYap() {
     if ($('#esleBoyut')) $('#esleBoyut').textContent = `(${boyutYaz(t)}${DOSYA.kullanim !== null && DOSYA.kullanim + t > BULUT_SINIR ? ' — bulutta yer yetmez, sığmayanlar yalnızca bilgisayarda kalır' : ''})`;
   };
   $$('[data-oto], [data-elle], [data-isesle]', kutu).forEach(x => x.onchange = () => { x.classList.remove('onerildi'); boyutHesap(); }); boyutHesap();
+  $$('[data-baska]', kutu).forEach(d => d.onclick = async () => {
+    const x = isOneri[+d.dataset.baska];
+    const k = await klasorAra(hepsi, `${x.i.mal_sahibi || x.i.mahalle || ''} ${x.i.ada || ''} ${x.i.parsel || ''}`);
+    if (!k) return;
+    let n = uygun.indexOf(k);
+    if (n < 0) { uygun.push(k); n = uygun.length - 1; }
+    const sel = $(`[data-isesle="${d.dataset.baska}"]`);
+    if (!sel.querySelector(`option[value="${n}"]`)) sel.insertAdjacentHTML('beforeend', `<option value="${n}">${esc(k.klasor)}</option>`);
+    sel.value = String(n); sel.classList.add('onerildi'); boyutHesap();
+  });
   if ($('#esleKaydet')) $('#esleKaydet').onclick = eslesmeKaydet;
+}
+// Bütün taranan klasörlerde (alt ve taşınmış klasörler dahil) arayıp birini seçtirir
+function klasorAra(liste, ipucu) {
+  return new Promise(coz => {
+    const p = $('#perde');
+    p.innerHTML = `<div class="pencere genis"><h3>Klasör seç</h3>
+      <input class="girdi" id="kaAra" type="search" autocomplete="off" placeholder="Klasör adı, mal sahibi, ada-parsel…">
+      <div class="ka-liste" id="kaListe"></div>
+      <div class="kucuk-yazi soluk">Klasör listede yoksa Dosya Yardımcısında seçtiğin ana klasörün dışında olabilir (ya da 4 kattan derinde). Önce o klasörün içine taşı, sonra yeniden tara.</div>
+      <div class="dugmeler"><button class="dugme hayalet" data-c="0">Vazgeç</button></div></div>`;
+    p.classList.remove('gizli');
+    const g = $('#kaAra'), l = $('#kaListe');
+    const ciz = () => {
+      const t = katla(g.value).split(/\s+/).filter(Boolean);
+      const s = liste.filter(k => { const a = katla(k.klasor); return t.every(x => a.includes(x)); }).slice(0, 200);
+      l.innerHTML = s.length ? s.map(k => `<button class="ka-satir" data-k="${esc(k.klasor)}"><b>${esc(k.ad)}</b><span class="kucuk-yazi soluk">${esc(k.klasor)} · ${k.dosya} dosya</span></button>`).join('') : '<div class="soluk" style="padding:8px">Bulunamadı.</div>';
+    };
+    const bitir = k => { p.classList.add('gizli'); coz(k); };
+    g.oninput = ciz; ciz(); g.focus();
+    g.onkeydown = e => { if (e.key === 'Escape') bitir(null); };
+    p.onclick = e => {
+      const b = e.target.closest('[data-k]');
+      if (b) return bitir(liste.find(k => k.klasor === b.dataset.k));
+      if (e.target.dataset.c !== undefined || e.target === p) bitir(null);
+    };
+  });
 }
 async function eslesmeKaydet() {
   const dugme = $('#esleKaydet'); dugme.disabled = true;
