@@ -342,7 +342,8 @@ async function dosyalarSayfasi() {
     <div class="kart"><div class="kart-bas"><h2>Bu bilgisayar</h2><span class="aciklama">Dosya Yardımcısı: proje klasörlerine yazar, dosyaları bilgisayardaki programla açar</span></div>
       <div class="kart-ic yigin">${y ? `
         <div class="sistem-satir" style="padding:0"><div class="durum-ikon ok">${ikon('tamam')}</div>
-          <div style="flex:1"><b>Dosya Yardımcısı çalışıyor</b><div class="soluk kucuk-yazi">Bilgisayar: ${esc(y.pc)} · sürüm ${esc(y.surum)}</div></div></div>
+          <div style="flex:1"><b>Dosya Yardımcısı çalışıyor</b><div class="soluk kucuk-yazi">Bilgisayar: ${esc(y.pc)} · sürüm ${esc(y.surum)}</div>
+          ${y.surum < '1.1.0' ? `<div class="kucuk-yazi" style="margin-top:4px"><b>Yeni sürüm var:</b> <a href="dosya_yardimcisi.zip" download>dosya_yardimcisi.zip</a>'i indirip içindeki KUR.bat'ı tekrar çalıştırın (bilgisayardaki her klasörden seçebilmek için).</div>` : ''}</div></div>
         <div class="alan"><label>Ana klasör (proje klasörlerinin bulunduğu yer)</label>
           <div style="display:flex;gap:8px;flex-wrap:wrap"><input class="girdi" id="kokYol" value="${esc(y.kok || '')}" placeholder="C:\\Users\\...\\ZEMİN ETÜT RAPORLARI" style="flex:1;min-width:260px">
           <button class="dugme" id="kokSec">${ikon('klasor')}Seç…</button><button class="dugme" id="kokKaydet">Kaydet</button></div>
@@ -475,8 +476,9 @@ function klasorAra(liste, ipucu) {
     p.innerHTML = `<div class="pencere genis"><h3>Klasör seç</h3>
       <input class="girdi" id="kaAra" type="search" autocomplete="off" placeholder="Klasör adı, mal sahibi, ada-parsel…">
       <div class="ka-liste" id="kaListe"></div>
-      <div class="kucuk-yazi soluk">Klasör listede yoksa Dosya Yardımcısında seçtiğin ana klasörün dışında olabilir (ya da 4 kattan derinde). Önce o klasörün içine taşı, sonra yeniden tara.</div>
-      <div class="dugmeler"><button class="dugme hayalet" data-c="0">Vazgeç</button></div></div>`;
+      <div class="kucuk-yazi soluk">Listede yoksa <b>Bilgisayarda gözat…</b> ile bilgisayarındaki herhangi bir klasörü seçebilirsin.</div>
+      <div class="dugmeler"><button class="dugme" id="kaGozat">${ikon('klasor')}Bilgisayarda gözat…</button><div style="flex:1"></div><button class="dugme hayalet" data-c="0">Vazgeç</button></div></div>`;
+    ikonlariDoldur(p);
     p.classList.remove('gizli');
     const g = $('#kaAra'), l = $('#kaListe');
     const ciz = () => {
@@ -488,6 +490,17 @@ function klasorAra(liste, ipucu) {
     const bitir = k => { p.classList.add('gizli'); coz(k); };
     const ciz0 = ciz; g.oninput = () => { ciz0(); ikonlariDoldur(l); }; ciz0(); ikonlariDoldur(l); g.focus();
     g.onkeydown = e => { if (e.key === 'Escape') bitir(null); };
+    $('#kaGozat').onclick = async () => {
+      const d = $('#kaGozat'); d.disabled = true; d.textContent = 'Açılan pencereden klasörü seçin…';
+      try {
+        const r = await yardimci('/klasor/sec', { json: {}, sure: 600000 });
+        if (r.secildi) return bitir({ klasor: r.klasor, ad: r.ad, dosya: r.dosya, alt: r.alt, boyut: r.boyut });
+      } catch (e) {
+        if (e.kod === 404) hataGoster(new Error('Dosya Yardımcısı eski sürüm. Dosyalar sayfasından dosya_yardimcisi.zip\'i indirip KUR.bat\'ı tekrar çalıştırın.'));
+        else hataGoster(e);
+      }
+      d.disabled = false; d.innerHTML = 'Bilgisayarda gözat…';
+    };
     p.onclick = e => {
       const a = e.target.closest('[data-ka-ac]');
       if (a) return klasoruAc(a.dataset.kaAc);
