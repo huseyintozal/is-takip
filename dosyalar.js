@@ -175,7 +175,7 @@ async function klasorDegistir(isId) {
 async function isKlasoru(i) {        // işin bilgisayardaki klasörü; yoksa adını üretip işe kaydeder
   const guncel = BULUT.isler.get(i.id) || i;
   if (guncel.klasor) {
-    const k = await klasorDogrula(guncel);
+    const k = await klasorDogrula(guncel, true);       // eski yola yazıp klasörü yeniden açmasın
     if (!k) throw new Error('Bu işin klasörü bulunamadı (taşınmış ya da silinmiş). İş sayfasındaki "Klasörü değiştir" ile yeni yerini seçin.');
     return k;
   }
@@ -275,11 +275,22 @@ async function dosyaAc(id) {
   const i = BULUT.isler.get(d.is_id) || {};
   await yardimciDenetle();
   if (yardimciHazir()) {                    // bilgisayarda: bilgisayardaki programla aç
-    let klasor = i.klasor ? await klasorDogrula(i) : '';
+    let klasor = i.klasor ? await klasorDogrula(i, true) : '';
     if (i.klasor && !klasor) { dosyaKartiCiz(i.id); return bildir('Bu işin klasörü bulunamadı (taşınmış ya da silinmiş). "Klasörü değiştir" ile yeni yerini seçin.', 'hata'); }
     if (klasor) {
       try { await yardimci('/ac', { json: yerAyir(klasor, d.ad) }); return; }
       catch (e) { if (e.kod !== 404) return hataGoster(e); }
+      // dosya klasörün içinde başka bir alt klasöre taşınmış olabilir: adından bul, kaydı düzelt
+      try {
+        const { dosyalar } = await yardimci(`/liste?klasor=${encodeURIComponent(klasor)}&alt=1`, { sure: 60000 });
+        const bulunan = dosyalar.filter(f => yalinAd(f.ad).toLocaleLowerCase('tr') === yalinAd(d.ad).toLocaleLowerCase('tr'));
+        if (bulunan.length === 1) {
+          const { data } = await BULUT.sb.from('dosyalar').update({ ad: bulunan[0].ad }).eq('id', d.id).select().single();
+          if (data) DOSYA.satirlar.set(d.id, data);
+          await yardimci('/ac', { json: yerAyir(klasor, bulunan[0].ad) }); dosyaKartiCiz(i.id); return;
+        }
+      } catch (e) { /* aşağıda devam */ }
+      if (!d.bulut_yolu) return bildir(`"${yalinAd(d.ad)}" klasörde bulunamadı (adı değişmiş ya da silinmiş olabilir). "Klasörden güncelle" ile listeyi yenileyin.`, 'hata');
     }
     if (d.bulut_yolu) {                     // bu bilgisayarda yok: buluttan indir, klasöre koy, aç
       try {
@@ -393,6 +404,13 @@ function dosyaKartiCiz(isId) {
     try {
       const k = await klasorDogrula(i, true); if (!k) return dosyaKartiCiz(isId);
       const { dosya } = await klasorDosyalariniEkle(isId, k);
+      // bilgisayarda artık olmayan (adı değişmiş/silinmiş), buluta da yüklenmemiş kayıtlar
+      const { dosyalar } = await yardimci(`/liste?klasor=${encodeURIComponent(k)}&alt=1`, { sure: 60000 });
+      const var_ = new Set(dosyalar.map(f => f.ad));
+      const eksik = isDosyalari(isId).filter(d => !d.bulut_yolu && d.pc === buCihaz() && !var_.has(d.ad));
+      if (eksik.length && await onayla('Klasörde olmayan dosyalar', `${eksik.length} dosya artık klasörde yok (adı değişmiş ya da silinmiş):<br><b>${eksik.map(d => esc(yalinAd(d.ad))).join(', ')}</b><br>Listeden kaldırılsın mı?`, 'Kaldır')) {
+        for (const d of eksik) { const { error } = await BULUT.sb.from('dosyalar').delete().eq('id', d.id); if (!error) DOSYA.satirlar.delete(d.id); }
+      }
       bildir(dosya ? `${dosya} yeni dosya listeye eklendi` : 'Klasörde yeni dosya yok'); dosyaKartiCiz(isId);
     } catch (e) { hataGoster(e); }
   };
@@ -472,7 +490,7 @@ async function dosyalarSayfasi() {
       <div class="kart-ic yigin">${y ? `
         <div class="sistem-satir" style="padding:0"><div class="durum-ikon ok">${ikon('tamam')}</div>
           <div style="flex:1"><b>Dosya Yardımcısı çalışıyor</b><div class="soluk kucuk-yazi">Bilgisayar: ${esc(y.pc)} · sürüm ${esc(y.surum)}</div>
-          ${y.surum < '1.3.0' ? `<div class="kucuk-yazi" style="margin-top:4px"><b>Yeni sürüm var:</b> <a href="dosya_yardimcisi.zip" download>dosya_yardimcisi.zip</a>'i indirip içindeki KUR.bat'ı tekrar çalıştırın (alt klasörler, klasör seçme ve taşınan klasör takibi için).</div>` : ''}</div></div>
+          ${y.surum < '1.3.1' ? `<div class="kucuk-yazi" style="margin-top:4px"><b>Yeni sürüm var:</b> <a href="dosya_yardimcisi.zip" download>dosya_yardimcisi.zip</a>'i indirip içindeki KUR.bat'ı tekrar çalıştırın (alt klasörler, klasör seçme ve taşınan klasör takibi için).</div>` : ''}</div></div>
         <div class="alan"><label>Ana klasör (proje klasörlerinin bulunduğu yer)</label>
           <div style="display:flex;gap:8px;flex-wrap:wrap"><input class="girdi" id="kokYol" value="${esc(y.kok || '')}" placeholder="C:\\Users\\...\\ZEMİN ETÜT RAPORLARI" style="flex:1;min-width:260px">
           <button class="dugme" id="kokSec">${ikon('klasor')}Seç…</button><button class="dugme" id="kokKaydet">Kaydet</button></div>
