@@ -346,7 +346,7 @@ async function dosyalarSayfasi() {
         <div class="alan"><label>Ana klasör (proje klasörlerinin bulunduğu yer)</label>
           <div style="display:flex;gap:8px;flex-wrap:wrap"><input class="girdi" id="kokYol" value="${esc(y.kok || '')}" placeholder="C:\\Users\\...\\ZEMİN ETÜT RAPORLARI" style="flex:1;min-width:260px">
           <button class="dugme" id="kokSec">${ikon('klasor')}Seç…</button><button class="dugme" id="kokKaydet">Kaydet</button></div>
-          <div class="ipucu">Alt klasörler (0-1 YAZIMA HAZIR RAPORLAR gibi) dahil 4 kata kadar taranır.</div></div>
+          <div class="ipucu">Durum klasörlerinin (0-1 YAZIMA HAZIR RAPORLAR gibi) içine de bakılır; proje klasörlerinin alt klasörleri listelenmez.</div></div>
         <div class="alan"><label>Yeni proje klasörleri nereye açılsın? (ana klasöre göre, boş = ana klasörün içine)</label>
           <input class="girdi" id="yeniYer" value="${esc(yerel)}" placeholder="örn. 0-1 YAZIMA HAZIR RAPORLAR"></div>`
       : `<div class="kutu uyari">${ikon('uyari')}<div><b>Dosya Yardımcısı bu bilgisayarda çalışmıyor ya da tarayıcı izin vermedi.</b>
@@ -385,6 +385,11 @@ async function taramaYap() {
   const isler = tumIsler();
   const bagli = new Map(isler.filter(i => i.klasor).map(i => [i.klasor, i]));
   let yoksay = []; try { yoksay = JSON.parse(localStorage.getItem('isTakip.yoksayKlasor') || '[]'); } catch (e) { /* */ }
+  // alt klasörleri ayıkla: proje klasörünün (ya da içinde dosya olan bir klasörün) altındakiler gösterilmez
+  const tumu = new Map(sonuc.klasorler.map(k => [k.klasor, k]));
+  const projeMi = k => bagli.has(k.klasor) || klasorAyristir(k.ad) || (k.dosya > 0 && k.alt === 0);
+  const ustler = yol => { const p = yol.split('/'); return p.slice(0, -1).map((_, n) => p.slice(0, n + 1).join('/')); };
+  sonuc.klasorler = sonuc.klasorler.filter(k => !ustler(k.klasor).some(u => { const x = tumu.get(u); return x && (projeMi(x) || x.dosya > 0); }));
   const otomatik = [], elle = [], zaten = [];
   sonuc.klasorler.forEach(k => {
     if (bagli.has(k.klasor)) { zaten.push({ k, i: bagli.get(k.klasor) }); return; }
