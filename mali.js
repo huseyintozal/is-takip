@@ -129,13 +129,33 @@ async function isverenFiyatDegistir(anahtar, yeni) {
   if (eski === yeni) return;
   const etkilenen = tumIsler().filter(i => ik(i.isveren) === anahtar && isMali(i).bedel.kaynak !== 'ozel');
   if (eski && etkilenen.length) {
-    const sabitle = await onayla('Eski işler ne olsun?', `<b>${esc(c.ad)}</b> fiyatı ${tl(eski)} → <b>${tl(yeni)}</b> oluyor.<br><br>
-      Fiyatı ayrıca girilmemiş <b>${etkilenen.length}</b> iş var. Bu işler <b>eski fiyatta (${tl(eski)}) kalsın</b> mı?<br>
-      <span class="soluk kucuk-yazi">"Vazgeç" derseniz bu işler de yeni fiyattan hesaplanır.</span>`, 'Eski fiyatta kalsın');
-    if (sabitle) for (const i of etkilenen) await isUcretKaydet(i.id, { ucret: eski });
+    const secim = await ikiSecenek('Eski işler ne olsun?', `<b>${esc(c.ad)}</b> fiyatı ${tl(eski)} → <b>${tl(yeni)}</b> oluyor.
+      Fiyatı ayrıca girilmemiş <b>${etkilenen.length}</b> iş var.`, `Hepsi yeni fiyattan (${tl(yeni)})`, `Eski işler ${tl(eski)}'de kalsın`);
+    if (secim === null) return false;
+    if (secim === 2) for (const i of etkilenen) await isUcretKaydet(i.id, { ucret: eski });
   }
   await cariGuncelle(c.id, { varsayilan_ucret: yeni });
   bildir(`${c.ad}: iş başı ${tl(yeni)}`);
+  return true;
+}
+function ikiSecenek(baslik, metin, bir, iki) {
+  return new Promise(coz => {
+    const p = $('#perde');
+    p.innerHTML = `<div class="pencere"><h3>${esc(baslik)}</h3><p>${metin}</p>
+      <div class="yigin" style="gap:8px"><button class="dugme ana" data-c="1">${esc(bir)}</button><button class="dugme" data-c="2">${esc(iki)}</button>
+      <button class="dugme hayalet" data-c="0">Vazgeç (fiyat değişmesin)</button></div></div>`;
+    p.classList.remove('gizli');
+    p.onclick = e => { const c = e.target.closest('[data-c]'); if (c || e.target === p) { p.classList.add('gizli'); coz(c && c.dataset.c !== '0' ? +c.dataset.c : null); } };
+  });
+}
+/* İşverenin özel fiyat girilmiş işlerini iş başı fiyata döndürür */
+async function ozelFiyatlariKaldir(anahtar) {
+  const c = isverenCari(anahtar);
+  const l = tumIsler().filter(i => ik(i.isveren) === anahtar && isMali(i).bedel.kaynak === 'ozel');
+  if (!l.length || !c) return;
+  if (!await onayla('Hepsine iş başı fiyat uygulansın mı?', `<b>${esc(c.ad)}</b>: özel fiyat girilmiş <b>${l.length}</b> işin fiyatı silinecek, hepsi <b>${tl(c.varsayilan_ucret)}</b> üzerinden hesaplanacak.`, 'Uygula')) return;
+  for (const i of l) await isUcretKaydet(i.id, { ucret: null });
+  bildir(`${l.length} iş ${tl(c.varsayilan_ucret)} üzerinden hesaplanıyor`);
 }
 function hareketPenceresi({ cari, tur, isler = [] }) {
   return new Promise(coz => {
@@ -218,7 +238,7 @@ async function maliSayfasi(rest) {
       <tbody>${isverenler_.map(x => `<tr data-isveren="${esc(x.anahtar)}">
         <td><a href="#/mali/isveren/${encodeURIComponent(x.anahtar)}" class="ms">${esc(x.ad)}</a>${x.fiyatsiz ? `<div class="kucuk-yazi" style="color:var(--turuncu)">${x.fiyatsiz} iş fiyatsız</div>` : ''}</td>
         <td class="sag">${x.isler.length}</td>
-        <td><input class="girdi fiyat-girdi" data-fiyat="${esc(x.anahtar)}" inputmode="decimal" value="${x.cari && Number(x.cari.varsayilan_ucret) ? esc(String(Number(x.cari.varsayilan_ucret))) : ''}" placeholder="₺"></td>
+        <td><input class="girdi fiyat-girdi" data-fiyat="${esc(x.anahtar)}" inputmode="decimal" value="${x.cari && Number(x.cari.varsayilan_ucret) ? esc(String(Number(x.cari.varsayilan_ucret))) : ''}" placeholder="₺">${(() => { const n = x.isler.filter(i => isMali(i).bedel.kaynak === 'ozel').length; return n && x.cari && Number(x.cari.varsayilan_ucret) ? `<div class="kucuk-yazi soluk">${n} iş özel fiyatta · <a href="#" data-hepsine="${esc(x.anahtar)}">hepsine uygula</a></div>` : ''; })()}</td>
         <td class="sag">${tl(x.bedel)}</td><td class="sag">${tl(x.alinan)}</td><td class="sag">${!x.bedel && !x.alinan ? '<span class="soluk">—</span>' : kalanEtiket(x.kalan)}</td>
         <td class="sag"><button class="dugme kucuk" data-tahsil="${esc(x.anahtar)}">${ikon('arti')}Ödeme al</button></td></tr>`).join('')}</tbody>
       <tfoot><tr><td><b>Toplam</b></td><td class="sag">${isverenler_.reduce((t, x) => t + x.isler.length, 0)}</td><td></td>
@@ -228,6 +248,10 @@ async function maliSayfasi(rest) {
       const n = tutarOku(g.value);
       if (g.value.trim() && n === null) return bildir('Geçerli bir fiyat yazın', 'hata');
       try { await isverenFiyatDegistir(g.dataset.fiyat, n || 0); maliSayfasi([]); } catch (e) { hataGoster(e); }
+    });
+    $$('[data-hepsine]', kutu).forEach(a => a.onclick = async e => {
+      e.preventDefault();
+      try { await ozelFiyatlariKaldir(a.dataset.hepsine); maliSayfasi([]); } catch (x2) { hataGoster(x2); }
     });
     $$('[data-tahsil]', kutu).forEach(b => b.onclick = async () => {
       const c = await isverenCariAl(b.dataset.tahsil);
@@ -299,7 +323,8 @@ function isverenHesapSayfasi(anahtar) {
       <div class="kart ozet-kutu"><div class="simge turuncu">${ikon('lira')}</div><div><div class="sayi">${tl(Math.max(0, x.kalan))}</div><div class="baslik">${x.kalan < 0 ? tl(-x.kalan) + ' fazla ödendi' : 'Kalan alacak'}</div></div></div></div>
     <div class="is-duzen">
       <div class="kart"><div class="kart-bas"><h2>İşler</h2><span class="aciklama">Boş bırakılan fiyat iş başı fiyattan gelir</span><div style="flex:1"></div>
-        <label class="kucuk-yazi soluk" style="display:flex;gap:6px;align-items:center">İş başı <input class="girdi fiyat-girdi" id="vFiyat" inputmode="decimal" style="width:120px" value="${x.cari && Number(x.cari.varsayilan_ucret) ? Number(x.cari.varsayilan_ucret) : ''}" placeholder="₺"></label></div>
+        <label class="kucuk-yazi soluk" style="display:flex;gap:6px;align-items:center">İş başı <input class="girdi fiyat-girdi" id="vFiyat" inputmode="decimal" style="width:120px" value="${x.cari && Number(x.cari.varsayilan_ucret) ? Number(x.cari.varsayilan_ucret) : ''}" placeholder="₺"></label>
+        ${(() => { const n = x.isler.filter(i => isMali(i).bedel.kaynak === 'ozel').length; return n && x.cari && Number(x.cari.varsayilan_ucret) ? `<span class="kucuk-yazi soluk">${n} iş özel fiyatta · <a href="#" id="vHepsine">hepsine uygula</a></span>` : ''; })()}</div>
         <div class="tablo-kap"><table class="veri mali-tablo"><thead><tr><th>Mal sahibi</th><th>Ada/Parsel</th><th>Durum</th><th style="width:150px">Bedel</th></tr></thead>
         <tbody>${x.isler.map(i => { const m = isMali(i); const d = isDurumu(i);
           return `<tr><td><a class="ms" href="${isHash(i)}">${esc(i.mal_sahibi || i.mahalle || '—')}</a></td><td>${esc(adaParsel(i))}</td>
@@ -313,6 +338,7 @@ function isverenHesapSayfasi(anahtar) {
   kopyaBagla();
   $('#tahsil').onclick = async () => { const c = await isverenCariAl(anahtar); if (await hareketPenceresi({ cari: c, tur: 'tahsilat', isler: x.isler })) isverenHesapSayfasi(anahtar); };
   $('#vFiyat').onchange = async e => { try { await isverenFiyatDegistir(anahtar, tutarOku(e.target.value) || 0); isverenHesapSayfasi(anahtar); } catch (x2) { hataGoster(x2); } };
+  if ($('#vHepsine')) $('#vHepsine').onclick = async e => { e.preventDefault(); try { await ozelFiyatlariKaldir(anahtar); isverenHesapSayfasi(anahtar); } catch (x2) { hataGoster(x2); } };
   $$('[data-isucret]').forEach(g => g.onchange = async () => {
     const n = tutarOku(g.value);
     if (g.value.trim() && n === null) return bildir('Geçerli bir fiyat yazın', 'hata');
