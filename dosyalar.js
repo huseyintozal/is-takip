@@ -385,16 +385,17 @@ async function taramaYap() {
   const isler = tumIsler();
   const bagli = new Map(isler.filter(i => i.klasor).map(i => [i.klasor, i]));
   let yoksay = []; try { yoksay = JSON.parse(localStorage.getItem('isTakip.yoksayKlasor') || '[]'); } catch (e) { /* */ }
-  // alt klasörleri ayıkla: proje klasörünün (ya da içinde dosya olan bir klasörün) altındakiler gösterilmez
+  // Yalnızca ANA proje klasörleri: kök ya da durum klasörlerinin (0-1 YAZIMA HAZIR RAPORLAR gibi) hemen altındakiler.
+  // Proje klasörlerinin içindeki alt klasörler (MİMARİ, FOTO…) hiç gösterilmez.
   const tumu = new Map(sonuc.klasorler.map(k => [k.klasor, k]));
-  const projeMi = k => bagli.has(k.klasor) || klasorAyristir(k.ad) || (k.dosya > 0 && k.alt === 0);
+  const grupMu = k => !bagli.has(k.klasor) && k.dosya === 0 && !(klasorAyristir(k.ad) || {}).ada &&
+    (k.alt >= 8 || /^\d+\s*[-.)_]/.test(k.ad) || /RAPORLAR|BEKLEYEN|HAZIR|TAMAMLAN|ARŞ[İI]V|B[İI]TEN|[İI]ŞLER|PROJELER|ZEM[İI]N ET[ÜU]T/i.test(k.ad));
   const ustler = yol => { const p = yol.split('/'); return p.slice(0, -1).map((_, n) => p.slice(0, n + 1).join('/')); };
-  sonuc.klasorler = sonuc.klasorler.filter(k => !ustler(k.klasor).some(u => { const x = tumu.get(u); return x && (projeMi(x) || x.dosya > 0); }));
+  sonuc.klasorler = sonuc.klasorler.filter(k => !grupMu(k) && ustler(k.klasor).every(u => tumu.has(u) && grupMu(tumu.get(u))));
   const otomatik = [], elle = [], zaten = [];
   sonuc.klasorler.forEach(k => {
     if (bagli.has(k.klasor)) { zaten.push({ k, i: bagli.get(k.klasor) }); return; }
     const ap = klasorAyristir(k.ad);
-    if (!ap && !(k.dosya > 0 && k.alt === 0)) return;           // proje klasörü değil (durum klasörü vb.)
     if (yoksay.includes(k.klasor)) return;
     const e = eslesmeBul(k, isler);
     const bos = e.isler.filter(x => !x.i.klasor);
@@ -402,7 +403,7 @@ async function taramaYap() {
     else elle.push({ k, oneriler: e.isler.map(x => x.i) });
   });
   // klasörü olmayan işler için öneriler (iş tarafından eşleştirme)
-  const uygun = sonuc.klasorler.filter(k => !bagli.has(k.klasor) && !yoksay.includes(k.klasor) && (klasorAyristir(k.ad) || (k.dosya > 0 && k.alt === 0)));
+  const uygun = sonuc.klasorler.filter(k => !bagli.has(k.klasor) && !yoksay.includes(k.klasor) && true);
   const otoKlasor = new Set(otomatik.map(x => x.k.klasor)), otoIs = new Set(otomatik.map(x => x.i.id));
   const isOneri = isler.filter(i => !i.klasor && !otoIs.has(i.id)).map(i => {
     const adaylar = uygun.map((k, n) => ({ n, k, puan: klasorPuani(i, k) })).filter(x => x.puan >= 2).sort((a, b) => b.puan - a.puan).slice(0, 8);
