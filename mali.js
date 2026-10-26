@@ -76,6 +76,30 @@ function varsayilanTedarikci(tur) {
   return l.find(c => c.varsayilan) || (l.length === 1 ? l[0] : null);
 }
 
+/* İşe ayrıca seçilmemişse sondajcı/lab adını işin notlarından bulur: "ÖMERE ATILDI", "AYGÜN YAPTI" … */
+function nottanTedarikci(i, tur) {
+  const l = carilerTur(tur); if (!l.length) return null;
+  const n = i.alan_notlari || {};
+  const metin = katla((tur === 'sondaj' ? [n.sondaj, n.sondaja_atildi] : [n.laba_atildi, n.lab]).filter(Boolean).join(' '));
+  if (!metin) return null;
+  const bul = l.filter(c => { const ad = katla(c.ad).trim(); return ad && new RegExp('(^|[^A-Z0-9])' + ad.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(metin); });
+  return bul.length === 1 ? bul[0] : null;
+}
+/* Sondajı yapılmış / laba atılmış ama kime yapıldığı belli olmayan işler: buradan tek tek seçilir */
+function atanmamisKart() {
+  const gruplar = [['sondaj', 'sondajci_id', 'Sondajcısı seçilmemiş işler', i => i.sondaj || i.sondaja_atildi],
+                   ['lab', 'lab_id', 'Laboratuvarı seçilmemiş işler', i => i.laba_atildi]]
+    .filter(([tur]) => carilerTur(tur).length > 1)
+    .map(([tur, alan, baslik, kosul]) => ({ tur, alan, baslik, isler: tumIsler().filter(i => kosul(i) && !isMali(i)[tur].cari) }))
+    .filter(g => g.isler.length);
+  return gruplar.map(g => `<div class="kart"><div class="kart-bas"><h2>${esc(g.baslik)} (${g.isler.length})</h2>
+      <span class="aciklama">Seçtiğin kişiye borç yazılır. İş notunda adı geçiyorsa ("ÖMERE ATILDI" gibi) kendiliğinden bulunur.</span></div>
+    <div class="tablo-kap"><table class="veri mali-tablo"><tbody>${g.isler.map(i => `<tr>
+      <td><a class="ms" href="${isHash(i)}">${esc(i.mal_sahibi || i.mahalle || '—')}</a><div class="kucuk-yazi soluk">${esc(isverenAdi(ik(i.isveren)))} · ${esc(adaParsel(i))}</div></td>
+      <td class="kucuk-yazi">${g.tur === 'sondaj' ? (i.sondaj ? 'Sondaj yapıldı' : 'Sondaja atıldı') : 'Laba atıldı'}</td>
+      <td style="width:220px"><select class="girdi" data-ata="${esc(i.id)}" data-alan="${g.alan}"><option value="">— seçin —</option>
+        ${carilerTur(g.tur).map(c => `<option value="${esc(c.id)}">${esc(c.ad)}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table></div></div>`).join('');
+}
 /* Bir işin bedeli ve maliyetleri */
 function isMali(i) {
   const u = MALI.ucretler.get(i.id) || {};
@@ -83,7 +107,7 @@ function isMali(i) {
   const bedel = u.ucret !== null && u.ucret !== undefined ? { tutar: Number(u.ucret), kaynak: 'ozel' }
     : ic && Number(ic.varsayilan_ucret) ? { tutar: Number(ic.varsayilan_ucret), kaynak: 'varsayilan' } : { tutar: 0, kaynak: 'yok' };
   const tedarik = (tur, idAlan, ucretAlan, yapildi) => {
-    const c = (u[idAlan] && MALI.cariler.get(u[idAlan])) || varsayilanTedarikci(tur);
+    const c = (u[idAlan] && MALI.cariler.get(u[idAlan])) || nottanTedarikci(i, tur) || varsayilanTedarikci(tur);
     if (!c) return { cari: null, tutar: 0, yapildi, kaynak: 'yok' };
     const ozel = u[ucretAlan] !== null && u[ucretAlan] !== undefined;
     return { cari: c, tutar: ozel ? Number(u[ucretAlan]) : Number(c.varsayilan_ucret) || 0, yapildi, kaynak: ozel ? 'ozel' : 'varsayilan', secili: !!u[idAlan] };
@@ -324,6 +348,7 @@ async function maliSayfasi(rest) {
             <td class="sag">${tl(x.borc)}</td><td class="sag">${tl(x.odenen)}</td><td class="sag">${kalanEtiket(x.kalan, false)}</td>
             <td class="sag"><button class="dugme kucuk" data-ode="${esc(x.cari.id)}">${ikon('arti')}Ödeme yap</button></td></tr>`).join('')}</tbody></table></div>`
           : '<div class="kart-ic soluk">Henüz laboratuvar ya da sondajcı eklenmedi.</div>'}</div>
+      ${atanmamisKart()}
       <div class="kart"><div class="kart-bas"><h2>Yeni ekle</h2></div><div class="kart-ic">
         <form id="cariEkle" class="mali-form">
           <select class="girdi" id="cTur"><option value="lab">Laboratuvar</option><option value="sondaj">Sondajcı</option></select>
@@ -343,6 +368,9 @@ async function maliSayfasi(rest) {
         MALI.cariler.set(data.id, data); bildir(`${ad} eklendi`); maliSayfasi([]);
       } catch (x) { hataGoster(/duplicate|unique/i.test(x.message) ? new Error('Bu adla zaten kayıt var') : x); }
     };
+    $$('[data-ata]', kutu).forEach(sel => sel.onchange = async () => {
+      try { await isUcretKaydet(sel.dataset.ata, { [sel.dataset.alan]: sel.value || null }); bildir('Kaydedildi'); maliSayfasi([]); } catch (x2) { hataGoster(x2); }
+    });
     $$('[data-ode]', kutu).forEach(b => b.onclick = async () => {
       const x = tedarik.find(t => t.cari.id === b.dataset.ode);
       if (await hareketPenceresi({ cari: x.cari, tur: 'odeme', isler: x.yapilan.map(y => y.i) })) maliSayfasi([]);
@@ -461,7 +489,7 @@ function maliIsKartiCiz(isId) {
   const kart = $('#ucretKarti'); if (!kart || kart.dataset.is !== isId) return;
   const i = BULUT.isler.get(isId); if (!i) return;
   const m = isMali(i), u = MALI.ucretler.get(isId) || {};
-  const secim = (tur, alanId, sec) => `<select class="girdi" data-tsec="${alanId}"><option value="">${varsayilanTedarikci(tur) ? 'Varsayılan: ' + esc(varsayilanTedarikci(tur).ad) : '— seçin —'}</option>
+  const secim = (tur, alanId, sec) => `<select class="girdi" data-tsec="${alanId}"><option value="">${nottanTedarikci(i, tur) ? 'Nottan: ' + esc(nottanTedarikci(i, tur).ad) : varsayilanTedarikci(tur) ? 'Varsayılan: ' + esc(varsayilanTedarikci(tur).ad) : '— seçin —'}</option>
     ${carilerTur(tur).map(c => `<option value="${esc(c.id)}" ${sec === c.id ? 'selected' : ''}>${esc(c.ad)}</option>`).join('')}</select>`;
   kart.innerHTML = `<div class="kart-bas"><h2>Ücret</h2><div style="flex:1"></div><a class="kucuk-yazi" href="#/mali/isveren/${encodeURIComponent(ik(i.isveren))}">Hesap</a></div>
     <div class="kart-ic yigin mali-is">
