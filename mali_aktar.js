@@ -45,7 +45,11 @@ function firmaPlani(f, hedef, yeniAd) {
   const kullanilan = new Set();
   const satirlar = f.satirlar.map(s => {
     if (s.tur !== 'is') return { s };
-    if (!s.parsel) return { s, durum: 'yeni', uyari: 'ada/parsel yazmıyor, ayrı kayıt açılacak' };
+    if (!s.parsel) {      // ada/parsel yok: daha önce aktarıldıysa aynı adlı kaydı kullan
+      const onceki = hedef && tum.find(i => !kullanilan.has(i.id) && i.mali_kayit && ik(i.isveren) === hedef && !apNorm(i.parsel) && katla(i.mal_sahibi) === katla(s.mal_sahibi || s.metin));
+      if (onceki) { kullanilan.add(onceki.id); return { s, durum: 'eslesti', is: onceki }; }
+      return { s, durum: 'yeni', uyari: 'ada/parsel yazmıyor, ayrı kayıt açılacak' };
+    }
     const ms = katla(s.mal_sahibi || '').split(' ')[0] || '';
     const aday = tum.filter(i => !kullanilan.has(i.id) && apEslesir(i, s))
       .sort((x, y) => (katla(y.mal_sahibi || '').startsWith(ms) && ms ? 1 : 0) - (katla(x.mal_sahibi || '').startsWith(ms) && ms ? 1 : 0));
@@ -163,7 +167,7 @@ async function aktarimiYap() {
       const yeniIsler = [], ucretler = [], hareketler = [];
       const hareket = (s, tutar, aciklama, isId) => {
         const h = { cari_id: cari.id, tur: 'tahsilat', tutar, tarih: s.tarih || bugunIso(), aciklama, is_id: isId || null, ekleyen: BULUT.eposta };
-        if (yontemli && s.yontem) h.yontem = s.yontem;
+        if (yontemli) h.yontem = s.yontem || '';        // toplu kayıtta bütün satırların alanları aynı olmalı
         hareketler.push(h);
       };
       let esles = 0, yeni = 0, tasinan = 0;
