@@ -1,5 +1,5 @@
 /* İş Takibi — mali takip (yalnızca stil.css değişkenleri) */
-.mali-kutular { grid-template-columns: repeat(4, 1fr); }
+.mali-kutular { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .mali-kutular .sayi { font-size: 19px; }
 .ozet-kutu .simge.kirmizi { background: var(--kirmizi-z); color: var(--kirmizi); }
 .mali-kutular .ozet-kutu { cursor: default; }
