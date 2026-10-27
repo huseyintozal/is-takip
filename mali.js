@@ -416,6 +416,7 @@ async function maliSayfasi(rest) {
   if (!MALI.yuklu && !MALI.kurulumYok) await maliIndir();
   if (MALI.kurulumYok) return sayfaYaz(`<div class="ust"><div><h1>Mali takip</h1></div></div>${maliKurulumKutusu()}`);
   IT.isler = tumIsler(); IT.kopyalar = [];
+  if (rest[0] === 'aktar') return maliAktarSayfasi();
   if (rest[0] === 'isveren' && rest[1]) return isverenHesapSayfasi(ik(rest[1]));
   if (rest[0] === 'cari' && rest[1]) return tedarikciSayfasi(rest[1]);
   const isverenler_ = tumIsverenler().map(isverenOzet).sort((a, b) => b.kalan - a.kalan || trSirala(a.ad, b.ad));
@@ -426,7 +427,8 @@ async function maliSayfasi(rest) {
   const borc = t => tedarik.filter(x => x.cari.tur === t).reduce((s, x) => s + Math.max(0, x.kalan), 0);
   const fiyatsiz = isverenler_.reduce((t, x) => t + x.fiyatsiz, 0);
   const sekme = MALI.sekme;
-  sayfaYaz(`<div class="ust"><div><h1>Mali takip</h1><div class="alt">İşveren alacakları, laboratuvar ve sondajcı borçları</div></div></div>
+  sayfaYaz(`<div class="ust"><div><h1>Mali takip</h1><div class="alt">İşveren alacakları, laboratuvar ve sondajcı borçları</div></div>
+      <div class="bosluk"></div><a class="dugme" href="#/mali/aktar">${ikon('yukle')}Excel hesaplarını aktar</a></div>
     <div class="ozet-kutular mali-kutular">
       <div class="kart ozet-kutu"><div class="simge turuncu">${ikon('lira')}</div><div><div class="sayi">${tl(toplamAlacak)}</div><div class="baslik">İşverenlerden alacak</div></div></div>
       <div class="kart ozet-kutu"><div class="simge yesil">${ikon('para')}</div><div><div class="sayi">${tl(buAy)}</div><div class="baslik">Bu ay alınan</div></div></div>
