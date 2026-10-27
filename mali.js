@@ -475,6 +475,40 @@ function borcEklePenceresi(c) {
     };
   });
 }
+/* Firma firma mali hesap Excel'i (her firma bir sayfa, ilk sayfa özet) — eski Excel'lerle aynı düzen */
+function isRaporMetni(i) {
+  const mah = String(i.mahalle || '').toLocaleUpperCase('tr').replace(/\s*(MAHALLESİ|MAH\.?)$/, '').trim();
+  const ap = i.ada && !/^(-|0)$/.test(String(i.ada).trim()) ? `${i.ada} ADA ${i.parsel} PARSEL` : `${i.parsel} PARSEL`;
+  return [mah ? mah + ' MAH' : '', i.parsel ? ap : '', i.mal_sahibi || ''].filter(Boolean).join(' ');
+}
+function maliExcel(anahtarlar, dosyaAdi) {
+  const tarihD = t => { if (!t) return null; const d = new Date(String(t).length <= 10 ? t + 'T12:00:00' : t); return isNaN(d) ? null : d; };
+  const ozet = [[{ v: 'FİRMA', s: 'baslik' }, { v: 'İŞ SAYISI', s: 'baslik' }, { v: 'TOPLAM BEDEL', s: 'baslik' }, { v: 'ALINAN', s: 'baslik' }, { v: 'KALAN BORÇ', s: 'baslik' }]];
+  const sayfalar = [];
+  let tB = 0, tA = 0, tK = 0;
+  for (const a of anahtarlar) {
+    const x = isverenOzet(a);
+    if (!x.isler.length && !x.bedel && !x.alinan) continue;
+    const hr = x.cari ? cariHareketleri(x.cari.id).filter(h => h.tur === 'tahsilat') : [];
+    const kayitlar = [];
+    hr.filter(devirMi).forEach(h => kayitlar.push({ sira: 0, t: tarihD(h.tarih), m: h.aciklama || 'ESKİ HESAPTAN KALAN', b: -Number(h.tutar), a: null }));
+    x.isler.forEach(i => { const m = isMali(i); kayitlar.push({ sira: 1, t: tarihD(i.olusturma), m: isRaporMetni(i) + (i.mali_kayit || isDurumu(i).bitti ? '' : ` (${isDurumu(i).asama.ad})`), b: m.bedel.tutar || null, a: null }); });
+    hr.filter(h => !devirMi(h)).forEach(h => kayitlar.push({ sira: 1, t: tarihD(h.tarih), m: hareketDetay(h, false) || 'ÖDEME', b: null, a: Number(h.tutar) }));
+    kayitlar.sort((p, q) => p.sira - q.sira || (p.t && q.t ? p.t - q.t : p.t ? 1 : q.t ? -1 : 0));
+    const satirlar = [[{ v: 'TARİH', s: 'baslik' }, { v: 'RAPOR BİLGİLERİ', s: 'baslik' }, { v: 'RAPOR BEDELİ', s: 'baslik' }, { v: 'ALINAN', s: 'baslik' }],
+      ...kayitlar.map(k => [k.t ? { v: k.t, s: 'tarih' } : { v: '', s: 'metin' }, { v: k.m, s: 'metin' }, { v: k.b, s: 'para' }, { v: k.a, s: 'para' }]),
+      [], [null, null, { v: 'TOPLAM', s: 'kalin' }, { v: 'ALINAN TOP.', s: 'kalin' }],
+      [null, null, { v: x.bedel, s: 'kalinPara' }, { v: x.alinan, s: 'kalinPara' }], [],
+      [null, null, { v: x.kalan < 0 ? 'FAZLA ÖDEME' : 'BORÇ', s: 'kalin' }, { v: Math.abs(x.kalan), s: 'kalinPara' }]];
+    sayfalar.push({ ad: x.ad, genislik: [13, 70, 16, 16], satirlar });
+    ozet.push([{ v: x.ad, s: 'metin' }, { v: x.isler.length, s: 'metin' }, { v: x.bedel, s: 'para' }, { v: x.alinan, s: 'para' }, { v: x.kalan, s: 'para' }]);
+    tB += x.bedel; tA += x.alinan; tK += x.kalan;
+  }
+  if (!sayfalar.length) return bildir('Aktarılacak mali kayıt yok', 'hata');
+  if (sayfalar.length > 1) { ozet.push([{ v: 'TOPLAM', s: 'kalin' }, null, { v: tB, s: 'kalinPara' }, { v: tA, s: 'kalinPara' }, { v: tK, s: 'kalinPara' }]); sayfalar.unshift({ ad: 'ÖZET', genislik: [30, 11, 18, 18, 18], satirlar: ozet }); }
+  blobIndir(xlsxYaz(sayfalar), dosyaAdi);
+  bildir('Excel indirildi');
+}
 async function hareketSil(id) {
   const h = MALI.hareketler.get(id); if (!h) return;
   if (!await onayla('Kayıt silinsin mi?', `${esc(new Date(h.tarih).toLocaleDateString('tr-TR'))} tarihli <b>${tl(Math.abs(h.tutar))}</b> ${devirMi(h) ? 'devir alacak' : borcEkMi(h) ? 'borç kaydı' : h.tur === 'tahsilat' ? 'tahsilat' : 'ödeme'} silinecek.`, 'Sil', true)) return false;
@@ -511,7 +545,7 @@ async function maliSayfasi(rest) {
   const fiyatsiz = isverenler_.reduce((t, x) => t + x.fiyatsiz, 0);
   const sekme = MALI.sekme;
   sayfaYaz(`<div class="ust"><div><h1>Mali takip</h1><div class="alt">İşveren alacakları, laboratuvar ve sondajcı borçları</div></div>
-      <div class="bosluk"></div><a class="dugme" href="#/mali/aktar">${ikon('yukle')}Excel hesaplarını aktar</a></div>
+      <div class="bosluk"></div><button class="dugme" id="maliExcelVer">${ikon('indir')}Firma hesaplarını Excel'e ver</button><a class="dugme" href="#/mali/aktar">${ikon('yukle')}Excel hesaplarını aktar</a></div>
     <div class="ozet-kutular mali-kutular">
       <div class="kart ozet-kutu"><div class="simge turuncu">${ikon('lira')}</div><div><div class="sayi">${tl(toplamAlacak)}</div><div class="baslik">İşverenlerden alacak</div></div></div>
       <div class="kart ozet-kutu"><div class="simge yesil">${ikon('para')}</div><div><div class="sayi">${tl(alinanDonem)}</div><div class="baslik"><select id="maliDonem" class="donem-sec" title="Dönem">${Object.entries(DONEMLER).map(([k, v]) => `<option value="${k}" ${k === donem ? 'selected' : ''}>${v} alınan</option>`).join('')}</select></div></div></div>
@@ -526,6 +560,7 @@ async function maliSayfasi(rest) {
       <button data-sekme="hareket" class="${sekme === 'hareket' ? 'secili' : ''}">${ikon('liste')}Hareketler</button></div>
     <div id="maliIcerik"></div>`);
   $$('[data-sekme]').forEach(b => b.onclick = () => { MALI.sekme = b.dataset.sekme; maliSayfasi([]); });
+  $('#maliExcelVer').onclick = () => maliExcel(tumIsverenler().map(isverenOzet).sort((a, b) => trSirala(a.ad, b.ad)).map(x => x.anahtar), `Mali takip ${bugun()}.xlsx`);
   $('#maliDonem').onchange = e => { depoYaz('maliDonem', e.target.value); maliSayfasi([]); };
   const kutu = $('#maliIcerik');
   if (sekme === 'isveren') {
@@ -625,6 +660,7 @@ function isverenHesapSayfasi(anahtar) {
   sayfaYaz(`<div class="ust"><a class="geri" href="#/mali">${ikon('geri')}</a><div><h1>${esc(x.ad)}</h1><div class="alt">${x.isler.length} iş · bedel ${tl(x.bedel)} · alınan ${tl(x.alinan)}</div></div>
       <div class="bosluk"></div>${kopyaDugmesi(ozetMetin, 'dugme', 'Hesap özetini kopyala')}
       <button class="dugme" id="ekstre">${ikon('indir')}Cari ekstre (PDF)</button>
+      <button class="dugme" id="ekstreExcel">${ikon('indir')}Excel</button>
       <button class="dugme ana" id="tahsil">${ikon('arti')}Ödeme al</button></div>
     <div class="ozet-kutular mali-kutular" style="grid-template-columns:repeat(3,1fr)">
       <div class="kart ozet-kutu"><div class="simge">${ikon('liste')}</div><div><div class="sayi">${tl(x.bedel)}</div><div class="baslik">Toplam iş bedeli</div></div></div>
@@ -658,6 +694,7 @@ function isverenHesapSayfasi(anahtar) {
   $('#tahsil').onclick = async () => { const c = await isverenCariAl(anahtar); if (await hareketPenceresi({ cari: c, tur: 'tahsilat', isler: x.isler })) isverenHesapSayfasi(anahtar); };
   $$('[data-isode]').forEach(b => b.onclick = async () => { const c = await isverenCariAl(anahtar); if (await hareketPenceresi({ cari: c, tur: 'tahsilat', isler: x.isler, isId: b.dataset.isode })) isverenHesapSayfasi(anahtar); });
   $('#ekstre').onclick = () => cariEkstre(anahtar);
+  $('#ekstreExcel').onclick = () => maliExcel([anahtar], `${x.ad} hesap ${bugun()}.xlsx`);
   $('#gecmisEkle').onclick = async () => { if (await gecmisIsPenceresi(anahtar)) isverenHesapSayfasi(anahtar); };
   $$('[data-maliissil]').forEach(b => b.onclick = async () => {
     const i = BULUT.isler.get(b.dataset.maliissil); if (!i) return;
