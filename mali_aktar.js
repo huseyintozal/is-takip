@@ -8,7 +8,7 @@
 
 const AKTAR = { veri: null, plan: null };
 
-const apNorm = s => String(s || '').toLocaleUpperCase('tr').replace(/\s+/g, '').replace(/^-$/, '');
+const apNorm = s => String(s || '').toLocaleUpperCase('tr').replace(/\s+/g, '').replace(/^(-|0)$/, '');   // "-" ve "0" ada yok demek
 const isAnahtari = (ada, parsel) => apNorm(ada) + '/' + apNorm(parsel);
 /* Parselin bütün yazılışları: "46(36)" → 46, 36 ; "21-22" → 21, 22 */
 const parseller = p => new Set(apNorm(p).split(/[^0-9A-ZÇĞİÖŞÜ]+/).filter(Boolean));
@@ -52,6 +52,7 @@ function firmaPlani(f, hedef, yeniAd) {
     }
     const ms = katla(s.mal_sahibi || '').split(' ')[0] || '';
     const aday = tum.filter(i => !kullanilan.has(i.id) && apEslesir(i, s))
+      .sort((x, y) => (x.mali_kayit ? 1 : 0) - (y.mali_kayit ? 1 : 0))          // önce iş takibindeki iş
       .sort((x, y) => (katla(y.mal_sahibi || '').startsWith(ms) && ms ? 1 : 0) - (katla(x.mal_sahibi || '').startsWith(ms) && ms ? 1 : 0));
     const buFirma = hedef ? aday.filter(i => ik(i.isveren) === hedef) : [];
     if (buFirma.length) { kullanilan.add(buFirma[0].id); return { s, durum: 'eslesti', is: buFirma[0] }; }
@@ -59,10 +60,12 @@ function firmaPlani(f, hedef, yeniAd) {
     return { s, durum: 'yeni' };
   });
   const excelde = new Set(satirlar.filter(x => x.is).map(x => x.is.id));
-  const disarida = hedef ? tum.filter(i => ik(i.isveren) === hedef && !excelde.has(i.id)) : [];
+  const disarida = hedef ? tum.filter(i => ik(i.isveren) === hedef && !excelde.has(i.id) && !i.mali_kayit) : [];
+  // önceki aktarımdan kalan ve artık hiçbir Excel satırına denk gelmeyen geçmiş kayıtlar (ör. yazım hatası düzeltildi)
+  const artik = hedef ? tum.filter(i => ik(i.isveren) === hedef && !excelde.has(i.id) && i.mali_kayit) : [];
   const cari = hedef ? isverenCari(hedef) : null;
   const mevcutHareket = cari ? cariHareketleri(cari.id).filter(h => h.tur === 'tahsilat') : [];
-  return { f, hedef, yeniAd, satirlar, disarida, cari, mevcutHareket, sil: mevcutHareket.length > 0, aktar: true };
+  return { f, hedef, yeniAd, satirlar, disarida, artik, artikSil: true, cari, mevcutHareket, sil: mevcutHareket.length > 0, aktar: true };
 }
 
 async function maliAktarSayfasi() {
@@ -116,6 +119,7 @@ async function maliAktarSayfasi() {
             <span class="etiket">${p.satirlar.filter(x => x.s.tur === 'odeme' || x.s.tur === 'onceden_odeme').length + p.satirlar.filter(x => x.s.alinan).length} ödeme</span>
             ${t.devir ? `<span class="etiket">devir ${tl0(t.devir)}</span>` : ''}
             <span class="etiket turuncu">Excel'e göre borç ${tl0(p.f.excel_borc ?? p.f.hesap_borc)}</span></div>
+          ${p.artik.length ? `<label class="secim kucuk-yazi"><input type="checkbox" data-artiksil="${n}" ${p.artikSil ? 'checked' : ''}> Önceki aktarımdan kalan, artık Excel'deki hiçbir satıra denk gelmeyen <b>${p.artik.length}</b> geçmiş kaydı sil: ${p.artik.map(i => esc(kimlik(i))).join(', ')}</label>` : ''}
           ${p.mevcutHareket.length ? `<label class="secim kucuk-yazi"><input type="checkbox" data-sil="${n}" ${p.sil ? 'checked' : ''}> Bu firmanın programdaki mevcut <b>${p.mevcutHareket.length}</b> ödeme/devir kaydını sil, Excel'dekilerle değiştir (yoksa iki kez sayılır)</label>` : ''}
           ${uyarilar.length ? `<div class="kutu uyari" style="margin:0">${ikon('uyari')}<div><b>Eşleştirilemeyenler / dikkat:</b><ul style="margin:4px 0 0;padding-left:18px">${uyarilar.map(u => `<li>${esc(u)}</li>`).join('')}</ul></div></div>` : ''}
           ${p.satirlar.filter(x => x.durum === 'baska').map((x, k) => `<div class="kucuk-yazi" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -139,6 +143,7 @@ async function maliAktarSayfasi() {
   $$('[data-hedef]').forEach(s => s.onchange = () => { const n = +s.dataset.hedef; const p = P[n]; P[n] = Object.assign(firmaPlani(p.f, s.value, s.value ? '' : firmaAdiTemizle(p.f.klasor)), { aktar: p.aktar }); maliAktarSayfasi(); });
   $$('[data-aktar]').forEach(c => c.onchange = () => { P[+c.dataset.aktar].aktar = c.checked; });
   $$('[data-sil]').forEach(c => c.onchange = () => { P[+c.dataset.sil].sil = c.checked; });
+  $$('[data-artiksil]').forEach(c => c.onchange = () => { P[+c.dataset.artiksil].artikSil = c.checked; });
   $$('[data-baska]').forEach(s => s.onchange = () => { const [n, k] = s.dataset.baska.split(':').map(Number); P[n].satirlar[k].secim = s.value; });
   $('#aktarBasla').onclick = aktarimiYap;
 }
@@ -162,6 +167,7 @@ async function aktarimiYap() {
         MALI.cariler.set(data.id, data); cari = data;
       }
       // 2) eski ödeme/devir kayıtları
+      if (p.artikSil) for (const i of p.artik) { await api('DELETE', `is_takip/isler/${encodeURIComponent(i.id)}`); MALI.ucretler.delete(i.id); }
       if (p.sil) for (const h of p.mevcutHareket) { const { error } = await BULUT.sb.from('hareketler').delete().eq('id', h.id); if (error) throw sbHata(error); MALI.hareketler.delete(h.id); }
       // 3) işler
       const yeniIsler = [], ucretler = [], hareketler = [];
