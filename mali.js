@@ -483,29 +483,79 @@ function isRaporMetni(i) {
 }
 function maliExcel(anahtarlar, dosyaAdi) {
   const tarihD = t => { if (!t) return null; const d = new Date(String(t).length <= 10 ? t + 'T12:00:00' : t); return isNaN(d) ? null : d; };
-  const ozet = [[{ v: 'FİRMA', s: 'baslik' }, { v: 'İŞ SAYISI', s: 'baslik' }, { v: 'TOPLAM BEDEL', s: 'baslik' }, { v: 'ALINAN', s: 'baslik' }, { v: 'KALAN BORÇ', s: 'baslik' }]];
+  const T = { ana: '0F766E', acik: 'E6F4F1', zebra: 'F8FAFC', gri: '6B7280', koyu: '0F172A', turuncu: 'C2410C', turuncuAcik: 'FFF7ED', yesil: '15803D', yesilAcik: 'F0FDF4', sari: 'FEFCE8', cizgi: 'E5E7EB' };
+  const st = (o) => Object.assign({ kenar: 'ince' }, o);
+  const baslikSt = { b: true, sz: 18, renk: 'FFFFFF', dolgu: T.ana, hiza: 'left' };
+  const altBaslikSt = { i: true, renk: T.gri, sz: 10 };
+  const kpiEtiket = (renk) => ({ b: true, sz: 9, renk: T.gri, dolgu: 'F9FAFB', hiza: 'left', kenar: 'sol' });
+  const kpiDeger = (renk, fmt = 'para') => ({ b: true, sz: 16, renk, dolgu: 'F9FAFB', fmt, hiza: 'left', kenar: 'sol' });
+  const thSt = { b: true, renk: 'FFFFFF', dolgu: T.ana, kenar: 'ince', hiza: 'center' };
+  const tarihStr = new Date().toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
+  const ozetler = [];
   const sayfalar = [];
-  let tB = 0, tA = 0, tK = 0;
   for (const a of anahtarlar) {
     const x = isverenOzet(a);
     if (!x.isler.length && !x.bedel && !x.alinan) continue;
+    ozetler.push(x);
     const hr = x.cari ? cariHareketleri(x.cari.id).filter(h => h.tur === 'tahsilat') : [];
     const kayitlar = [];
-    hr.filter(devirMi).forEach(h => kayitlar.push({ sira: 0, t: tarihD(h.tarih), m: h.aciklama || 'ESKİ HESAPTAN KALAN', b: -Number(h.tutar), a: null }));
-    x.isler.forEach(i => { const m = isMali(i); kayitlar.push({ sira: 1, t: tarihD(i.olusturma), m: isRaporMetni(i) + (i.mali_kayit || isDurumu(i).bitti ? '' : ` (${isDurumu(i).asama.ad})`), b: m.bedel.tutar || null, a: null }); });
-    hr.filter(h => !devirMi(h)).forEach(h => kayitlar.push({ sira: 1, t: tarihD(h.tarih), m: hareketDetay(h, false) || 'ÖDEME', b: null, a: Number(h.tutar) }));
+    hr.filter(devirMi).forEach(h => kayitlar.push({ tur: 'devir', sira: 0, t: tarihD(h.tarih), m: h.aciklama || 'ESKİ HESAPTAN KALAN', b: -Number(h.tutar), a: null }));
+    x.isler.forEach(i => { const m = isMali(i); const d = isDurumu(i); kayitlar.push({ tur: 'is', sira: 1, t: tarihD(i.olusturma), m: isRaporMetni(i) + (i.mali_kayit || d.bitti ? '' : `  ·  ${d.asama.ad}`), b: m.bedel.tutar || null, a: null }); });
+    hr.filter(h => !devirMi(h)).forEach(h => kayitlar.push({ tur: 'odeme', sira: 1, t: tarihD(h.tarih), m: hareketDetay(h, false) || 'ÖDEME', b: null, a: Number(h.tutar) }));
     kayitlar.sort((p, q) => p.sira - q.sira || (p.t && q.t ? p.t - q.t : p.t ? 1 : q.t ? -1 : 0));
-    const satirlar = [[{ v: 'TARİH', s: 'baslik' }, { v: 'RAPOR BİLGİLERİ', s: 'baslik' }, { v: 'RAPOR BEDELİ', s: 'baslik' }, { v: 'ALINAN', s: 'baslik' }],
-      ...kayitlar.map(k => [k.t ? { v: k.t, s: 'tarih' } : { v: '', s: 'metin' }, { v: k.m, s: 'metin' }, { v: k.b, s: 'para' }, { v: k.a, s: 'para' }]),
-      [], [null, null, { v: 'TOPLAM', s: 'kalin' }, { v: 'ALINAN TOP.', s: 'kalin' }],
-      [null, null, { v: x.bedel, s: 'kalinPara' }, { v: x.alinan, s: 'kalinPara' }], [],
-      [null, null, { v: x.kalan < 0 ? 'FAZLA ÖDEME' : 'BORÇ', s: 'kalin' }, { v: Math.abs(x.kalan), s: 'kalinPara' }]];
-    sayfalar.push({ ad: x.ad, genislik: [13, 70, 16, 16], satirlar });
-    ozet.push([{ v: x.ad, s: 'metin' }, { v: x.isler.length, s: 'metin' }, { v: x.bedel, s: 'para' }, { v: x.alinan, s: 'para' }, { v: x.kalan, s: 'para' }]);
-    tB += x.bedel; tA += x.alinan; tK += x.kalan;
+    const satirlar = [
+      [{ v: `${x.ad}  —  CARİ HESAP`, s: baslikSt }, { v: '', s: baslikSt }, { v: '', s: baslikSt }, { v: '', s: baslikSt }],
+      [{ v: `Rapor tarihi: ${tarihStr}   ·   ${x.isler.length} iş   ·   ${hr.filter(h => !devirMi(h)).length} ödeme`, s: altBaslikSt }],
+      [],
+      [{ v: 'İŞ SAYISI', s: kpiEtiket() }, { v: 'TOPLAM BEDEL', s: kpiEtiket() }, { v: 'ALINAN', s: kpiEtiket() }, { v: x.kalan < 0 ? 'FAZLA ÖDEME' : 'KALAN BORÇ', s: kpiEtiket() }],
+      [{ v: x.isler.length, s: kpiDeger(T.koyu, 'sayi') }, { v: x.bedel, s: kpiDeger(T.ana) }, { v: x.alinan, s: kpiDeger(T.yesil) }, { v: Math.abs(x.kalan), s: kpiDeger(x.kalan > 0 ? T.turuncu : T.yesil) }],
+      [],
+      [{ v: 'TARİH', s: thSt }, { v: 'RAPOR BİLGİLERİ', s: thSt }, { v: 'RAPOR BEDELİ', s: thSt }, { v: 'ALINAN', s: thSt }],
+      ...kayitlar.map((k, n) => {
+        const dolgu = k.tur === 'devir' ? T.sari : k.tur === 'odeme' ? T.yesilAcik : (n % 2 ? T.zebra : null);
+        const o = { dolgu: dolgu || undefined };
+        return [k.t ? { v: k.t, s: st({ fmt: 'tarih', hiza: 'center', ...o }) } : { v: '', s: st(o) },
+          { v: k.m, s: st({ sar: true, i: k.tur === 'devir', renk: k.tur === 'odeme' ? T.yesil : undefined, ...o }) },
+          { v: k.b, s: st({ fmt: 'para', ...o }) }, { v: k.a, s: st({ fmt: 'para', b: k.tur === 'odeme', renk: k.tur === 'odeme' ? T.yesil : undefined, ...o }) }];
+      }),
+      [],
+      [null, { v: 'TOPLAM', s: { b: true, hiza: 'right', kenar: 'ince', dolgu: T.acik } }, { v: x.bedel, s: st({ b: true, fmt: 'para', dolgu: T.acik }) }, { v: x.alinan, s: st({ b: true, fmt: 'para', dolgu: T.acik, renk: T.yesil }) }],
+      [null, { v: x.kalan < 0 ? 'FAZLA ÖDEME' : 'KALAN BORÇ', s: { b: true, sz: 13, hiza: 'right', kenar: 'ince', dolgu: T.turuncuAcik, renk: T.turuncu } }, { v: '', s: st({ dolgu: T.turuncuAcik }) }, { v: Math.abs(x.kalan), s: st({ b: true, sz: 13, fmt: 'para', dolgu: T.turuncuAcik, renk: x.kalan > 0 ? T.turuncu : T.yesil }) }],
+    ];
+    const son = satirlar.length;
+    sayfalar.push({ ad: x.ad, genislik: [13, 56, 18, 18], satirlar, birlestir: ['A1:D1', 'A2:D2', `B${son}:C${son}`], yukseklik: { 1: 40, 2: 20, 4: 18, 5: 30, 7: 22, [son]: 26 },
+      dondur: 7, izgaraYok: true, sekmeRengi: x.kalan > 0 ? 'F59E0B' : '10B981' });
   }
   if (!sayfalar.length) return bildir('Aktarılacak mali kayıt yok', 'hata');
-  if (sayfalar.length > 1) { ozet.push([{ v: 'TOPLAM', s: 'kalin' }, null, { v: tB, s: 'kalinPara' }, { v: tA, s: 'kalinPara' }, { v: tK, s: 'kalinPara' }]); sayfalar.unshift({ ad: 'ÖZET', genislik: [30, 11, 18, 18, 18], satirlar: ozet }); }
+  if (sayfalar.length > 1) {
+    const sirali = ozetler.slice().sort((p, q) => q.kalan - p.kalan || trSirala(p.ad, q.ad));
+    const tB = sirali.reduce((t, x) => t + x.bedel, 0), tA = sirali.reduce((t, x) => t + x.alinan, 0), tK = sirali.reduce((t, x) => t + x.kalan, 0);
+    const bas = 8;                                             // tablonun ilk veri satırı
+    const satirlar = [
+      [{ v: 'MALİ TAKİP  —  FİRMA HESAPLARI', s: baslikSt }, ...Array(6).fill({ v: '', s: baslikSt })],
+      [{ v: `Rapor tarihi: ${tarihStr}   ·   ${sirali.length} firma   ·   ${sirali.reduce((t, x) => t + x.isler.length, 0)} iş`, s: altBaslikSt }],
+      [],
+      [null, { v: 'TOPLAM İŞ BEDELİ', s: kpiEtiket() }, { v: 'TAHSİL EDİLEN', s: kpiEtiket() }, { v: '', s: kpiEtiket() }, { v: 'KALAN ALACAK', s: kpiEtiket() }, { v: '', s: kpiEtiket() }, { v: 'TAHSİLAT ORANI', s: kpiEtiket() }],
+      [null, { v: tB, s: kpiDeger(T.ana) }, { v: tA, s: kpiDeger(T.yesil) }, { v: '', s: kpiDeger(T.yesil) }, { v: tK, s: kpiDeger(T.turuncu) }, { v: '', s: kpiDeger(T.turuncu) }, { v: tB ? tA / tB : 0, s: kpiDeger(T.koyu, 'yuzde') }],
+      [],
+      [{ v: '#', s: thSt }, { v: 'FİRMA', s: thSt }, { v: 'İŞ', s: thSt }, { v: 'TOPLAM BEDEL', s: thSt }, { v: 'ALINAN', s: thSt }, { v: 'KALAN ALACAK', s: thSt }, { v: 'TAHSİLAT', s: thSt }],
+      ...sirali.map((x, n) => { const o = { dolgu: n % 2 ? T.zebra : undefined };
+        return [{ v: n + 1, s: st({ hiza: 'center', renk: T.gri, ...o }) }, { v: x.ad, s: st({ b: true, ...o }) }, { v: x.isler.length, s: st({ hiza: 'center', ...o }) },
+          { v: x.bedel, s: st({ fmt: 'para', ...o }) }, { v: x.alinan, s: st({ fmt: 'para', renk: T.yesil, ...o }) },
+          { v: x.kalan, s: st({ fmt: 'para', b: true, renk: x.kalan > 0 ? T.turuncu : T.yesil, ...o }) },
+          { v: x.bedel ? x.alinan / x.bedel : 0, s: st({ fmt: 'yuzde', hiza: 'center', renk: T.gri, ...o }) }]; }),
+      [{ v: '', s: st({ dolgu: T.acik }) }, { v: 'TOPLAM', s: st({ b: true, dolgu: T.acik }) }, { v: sirali.reduce((t, x) => t + x.isler.length, 0), s: st({ b: true, hiza: 'center', dolgu: T.acik }) },
+        { v: tB, s: st({ b: true, fmt: 'para', dolgu: T.acik }) }, { v: tA, s: st({ b: true, fmt: 'para', dolgu: T.acik, renk: T.yesil }) },
+        { v: tK, s: st({ b: true, fmt: 'para', dolgu: T.acik, renk: T.turuncu }) }, { v: tB ? tA / tB : 0, s: st({ b: true, fmt: 'yuzde', hiza: 'center', dolgu: T.acik }) }],
+    ];
+    const sonVeri = bas + sirali.length - 1;
+    const borclu = sirali.filter(x => x.kalan > 0);
+    sayfalar.unshift({ ad: 'ÖZET', genislik: [5, 30, 7, 17, 17, 17, 15, 3], satirlar, izgaraYok: true, yatay: true, sekmeRengi: T.ana, dondur: 7,
+      birlestir: ['A1:G1', 'A2:G2', 'C4:D4', 'C5:D5', 'E4:F4', 'E5:F5'], yukseklik: { 1: 44, 2: 20, 4: 18, 5: 34, 7: 24 },
+      veriCubugu: [{ ref: `F${bas}:F${sonVeri}`, renk: 'F59E0B' }, { ref: `E${bas}:E${sonVeri}`, renk: '10B981' }],
+      grafik: { baslik: 'Firmalara göre kalan alacak', seri: 'Kalan alacak', renk: 'F59E0B', kategori: `B${bas}:B${bas + borclu.length - 1}`, deger: `F${bas}:F${bas + borclu.length - 1}`,
+        etiketler: borclu.map(x => x.ad), degerler: borclu.map(x => x.kalan), konum: [8, 2, 17, Math.max(24, 3 + borclu.length * 2)] } });
+  }
   blobIndir(xlsxYaz(sayfalar), dosyaAdi);
   bildir('Excel indirildi');
 }
