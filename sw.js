@@ -1,8 +1,11 @@
 /* İş Takibi — çevrimdışı açılış için uygulama dosyalarını saklar. Önce ağ (güncellemeler hemen gelsin), ağ yoksa saklanan. */
-const ONBELLEK = 'is-takip-v2';
+const ONBELLEK = 'is-takip-v3';
 self.addEventListener('install', e => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(
-  caches.keys().then(adlar => Promise.all(adlar.filter(a => a !== ONBELLEK).map(a => caches.delete(a)))).then(() => self.clients.claim())));
+  caches.keys().then(adlar => Promise.all(adlar.filter(a => a !== ONBELLEK).map(a => caches.delete(a))))
+    .then(() => self.clients.claim())
+    // eski sürümle açık kalmış sayfaları yeni sürümle yeniden yükle
+    .then(() => self.clients.matchAll({ type: 'window' })).then(l => Promise.all(l.map(c => c.navigate(c.url).catch(() => {}))))));
 self.addEventListener('fetch', e => {
   const u = new URL(e.request.url);
   if (e.request.method !== 'GET' || u.origin !== location.origin) return;     // Supabase istekleri saklanmaz

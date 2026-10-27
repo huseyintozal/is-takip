@@ -5,7 +5,7 @@
  *  - is_takip.js'in çağırdığı api('GET', 'is_takip/isler') gibi istekler burada Supabase'e çevrilir,
  *    böylece arayüz kodu masaüstü sürümüyle aynı kalır. */
 
-const WEB_SURUM = 'B1.10.1';
+const WEB_SURUM = 'B1.10.2';
 const D = { durum: null, firmalar: null };
 const BULUT = { sb: null, eposta: '', rol: '', isler: new Map(), canli: 'bekliyor', tazeleZaman: null, bekleyenTazele: false };
 
