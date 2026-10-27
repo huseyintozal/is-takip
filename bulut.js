@@ -5,7 +5,7 @@
  *  - is_takip.js'in çağırdığı api('GET', 'is_takip/isler') gibi istekler burada Supabase'e çevrilir,
  *    böylece arayüz kodu masaüstü sürümüyle aynı kalır. */
 
-const WEB_SURUM = 'B1.10.0';
+const WEB_SURUM = 'B1.10.1';
 const D = { durum: null, firmalar: null };
 const BULUT = { sb: null, eposta: '', rol: '', isler: new Map(), canli: 'bekliyor', tazeleZaman: null, bekleyenTazele: false };
 
@@ -58,6 +58,30 @@ async function isGuncelleBulut(id, govde) {
   const son = isGoc(Object.assign({}, data, { id }));
   BULUT.isler.set(id, son);
   return son;
+}
+
+/* Yeni sürüm denetimi: telefondaki ana ekran uygulaması kapatılmadan uzun süre açık kalabiliyor.
+   Uygulamaya her dönüldüğünde ve 10 dakikada bir sunucudaki sürüme bakar; yeniyse "Güncelle" çubuğu gösterir. */
+async function surumDenetle() {
+  try {
+    const r = await fetch('index.html?t=' + Date.now(), { cache: 'no-store' });
+    const m = (await r.text()).match(/bulut\.js\?v=([^"'&]+)/);
+    if (!m || m[1] === WEB_SURUM || $('#surumCubugu')) return;
+    const c = document.createElement('div');
+    c.id = 'surumCubugu'; c.className = 'surum-cubugu';
+    c.innerHTML = `<span>Yeni sürüm var (${esc(m[1])})</span><button class="dugme ana kucuk">Güncelle</button>`;
+    c.querySelector('button').onclick = async () => {
+      try { const k = await navigator.serviceWorker?.getRegistration(); if (k) await k.update(); } catch (e) { /* */ }
+      try { (await caches.keys()).forEach(a => caches.delete(a)); } catch (e) { /* */ }
+      location.reload();
+    };
+    document.body.appendChild(c);
+  } catch (e) { /* çevrimdışı */ }
+}
+function surumDenetimiBaslat() {
+  setTimeout(surumDenetle, 5000);
+  setInterval(surumDenetle, 10 * 60 * 1000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') surumDenetle(); });
 }
 
 /* is_takip.js'in sunucu istekleri (masaüstünde /api/... ; burada Supabase) */
@@ -446,8 +470,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.addEventListener('click', e => { if (e.target.closest('[data-is-ara]')) document.body.classList.remove('menu-acik'); }, true);
   $('#menuPerde').onclick = () => document.body.classList.remove('menu-acik');
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js').then(k => k.update()).catch(() => {});
   }
+  surumDenetimiBaslat();
   const a = baglantiAyari();
   if (!a.url || !a.anahtar || !window.supabase) return ayarEkrani();
   BULUT.sb = window.supabase.createClient(a.url, a.anahtar, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });

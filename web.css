@@ -79,3 +79,7 @@ body.girisli-degil .uygulama, body.girisli-degil .mobil-ust { display: none !imp
   #tablo table.isler .dd { width: 32px; height: 30px; }
   #tablo table.isler tr:hover td { background: none; }
 }
+
+.surum-cubugu { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 80;
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-radius: 12px; background: var(--metin, #0f172a); color: #fff;
+  box-shadow: 0 8px 24px rgba(0,0,0,.25); font-size: 14px; white-space: nowrap; }
