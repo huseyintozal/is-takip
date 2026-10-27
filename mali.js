@@ -422,8 +422,13 @@ async function maliSayfasi(rest) {
   const isverenler_ = tumIsverenler().map(isverenOzet).sort((a, b) => b.kalan - a.kalan || trSirala(a.ad, b.ad));
   const tedarik = ['lab', 'sondaj'].flatMap(t => carilerTur(t)).map(tedarikciOzet);
   const toplamAlacak = isverenler_.reduce((t, x) => t + Math.max(0, x.kalan), 0);
-  const ay = bugunIso().slice(0, 7);
-  const buAy = [...MALI.hareketler.values()].filter(h => h.tur === 'tahsilat' && !devirMi(h) && (h.tarih || '').startsWith(ay)).reduce((t, h) => t + Number(h.tutar), 0);
+  // alınan ödemeler: seçilen döneme göre (bu ay, geçen ay, son 3 ay, bu yıl, geçen yıl, tümü)
+  const DONEMLER = { buay: 'Bu ay', gecenay: 'Geçen ay', son3: 'Son 3 ay', buyil: 'Bu yıl', gecenyil: 'Geçen yıl', tumu: 'Toplam (tümü)' };
+  const donem = DONEMLER[depoOku('maliDonem', 'buay')] ? depoOku('maliDonem', 'buay') : 'buay';
+  const bt = new Date(), iso = d => d.toISOString().slice(0, 10), yil = bt.getFullYear(), ayNo = bt.getMonth();
+  const aralik = { buay: [iso(new Date(Date.UTC(yil, ayNo, 1))), '9999'], gecenay: [iso(new Date(Date.UTC(yil, ayNo - 1, 1))), iso(new Date(Date.UTC(yil, ayNo, 0)))],
+    son3: [iso(new Date(Date.UTC(yil, ayNo - 2, 1))), '9999'], buyil: [yil + '-01-01', '9999'], gecenyil: [(yil - 1) + '-01-01', (yil - 1) + '-12-31'], tumu: ['', '9999'] }[donem];
+  const alinanDonem = [...MALI.hareketler.values()].filter(h => h.tur === 'tahsilat' && !devirMi(h) && (h.tarih || '') >= aralik[0] && (h.tarih || '') <= aralik[1]).reduce((t, h) => t + Number(h.tutar), 0);
   const borc = t => tedarik.filter(x => x.cari.tur === t).reduce((s, x) => s + Math.max(0, x.kalan), 0);
   const fiyatsiz = isverenler_.reduce((t, x) => t + x.fiyatsiz, 0);
   const sekme = MALI.sekme;
@@ -431,7 +436,7 @@ async function maliSayfasi(rest) {
       <div class="bosluk"></div><a class="dugme" href="#/mali/aktar">${ikon('yukle')}Excel hesaplarını aktar</a></div>
     <div class="ozet-kutular mali-kutular">
       <div class="kart ozet-kutu"><div class="simge turuncu">${ikon('lira')}</div><div><div class="sayi">${tl(toplamAlacak)}</div><div class="baslik">İşverenlerden alacak</div></div></div>
-      <div class="kart ozet-kutu"><div class="simge yesil">${ikon('para')}</div><div><div class="sayi">${tl(buAy)}</div><div class="baslik">Bu ay alınan</div></div></div>
+      <div class="kart ozet-kutu"><div class="simge yesil">${ikon('para')}</div><div><div class="sayi">${tl(alinanDonem)}</div><div class="baslik"><select id="maliDonem" class="donem-sec" title="Dönem">${Object.entries(DONEMLER).map(([k, v]) => `<option value="${k}" ${k === donem ? 'selected' : ''}>${v} alınan</option>`).join('')}</select></div></div></div>
       <div class="kart ozet-kutu"><div class="simge vurgu">${ikon('deney')}</div><div><div class="sayi">${tl(borc('lab'))}</div><div class="baslik">Laboratuvara borç</div></div></div>
       <div class="kart ozet-kutu"><div class="simge">${ikon('saat')}</div><div><div class="sayi">${tl(borc('sondaj'))}</div><div class="baslik">Sondajcıya borç</div></div></div>
     </div>
@@ -442,6 +447,7 @@ async function maliSayfasi(rest) {
       <button data-sekme="hareket" class="${sekme === 'hareket' ? 'secili' : ''}">${ikon('liste')}Hareketler</button></div>
     <div id="maliIcerik"></div>`);
   $$('[data-sekme]').forEach(b => b.onclick = () => { MALI.sekme = b.dataset.sekme; maliSayfasi([]); });
+  $('#maliDonem').onchange = e => { depoYaz('maliDonem', e.target.value); maliSayfasi([]); };
   const kutu = $('#maliIcerik');
   if (sekme === 'isveren') {
     kutu.innerHTML = `<div class="kart"><div class="kart-bas"><h2>İşverenler</h2><span class="aciklama">Programa girmemiş eski alacakları "Mevcut alacakları gir" ile ekleyin</span>
@@ -552,7 +558,8 @@ function isverenHesapSayfasi(anahtar) {
           return `<tr><td>${i.mali_kayit ? `<span class="ms">${esc(i.mal_sahibi || i.mahalle || '—')}</span>` : `<a class="ms" href="${isHash(i)}">${esc(i.mal_sahibi || i.mahalle || '—')}</a>`}${i.mahalle ? `<div class="kucuk-yazi soluk">${esc(i.mahalle)}</div>` : ''}</td><td>${esc(adaParsel(i))}</td>
             <td>${i.mali_kayit || d.bitti ? '<span class="etiket">Bitti</span>' : `<span class="etiket ${d.asama.renk}">${esc(d.asama.ad)}</span>`}</td>
             <td><input class="girdi fiyat-girdi ${m.bedel.kaynak === 'ozel' ? 'ozel' : ''}" data-isucret="${esc(i.id)}" inputmode="decimal"
-              value="${m.bedel.kaynak === 'ozel' ? Number(m.bedel.tutar) : ''}" placeholder="${m.bedel.kaynak === 'varsayilan' ? tl(m.bedel.tutar) : 'fiyat yok'}"></td>
+              value="${m.bedel.kaynak === 'ozel' ? Number(m.bedel.tutar) : ''}" placeholder="${m.bedel.kaynak === 'varsayilan' ? tl(m.bedel.tutar) : 'fiyat yok'}">
+              ${m.bedel.kaynak === 'varsayilan' && x.isler.some(j => isMali(j).bedel.kaynak === 'ozel') ? '<div class="kucuk-yazi" style="color:var(--turuncu)">iş başı fiyattan</div>' : ''}</td>
             <td class="sag">${al ? (m.bedel.tutar && al >= m.bedel.tutar - 0.004 ? `<span class="etiket yesil">${tl(al)} · ödendi</span>` : tl(al)) : '<span class="soluk">—</span>'}</td>
             <td class="sag" style="white-space:nowrap"><button class="dugme kucuk hayalet" data-isode="${esc(i.id)}" title="Yalnızca bu işin ödemesini al">${ikon('arti')}Ödeme</button>
               ${i.mali_kayit ? `<button class="dugme kucuk hayalet tehlike" data-maliissil="${esc(i.id)}" title="Bu kaydı sil">${ikon('sil')}</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>
