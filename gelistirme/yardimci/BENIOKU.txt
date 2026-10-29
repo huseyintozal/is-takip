@@ -1,0 +1,16 @@
+İş Takibi — Dosya Yardımcısı
+
+Ne işe yarar?
+  İş Takibi web uygulaması bilgisayardaki proje klasörlerine bunun üzerinden ulaşır:
+  eklediğiniz dosyayı ilgili proje klasörüne kaydeder, dosyayı bilgisayardaki programla açar
+  (PDF okuyucu, AutoCAD, Word…), eski klasörleri tarayıp işlerle eşleştirir.
+
+Kurulum (her bilgisayarda bir kez):
+  1. KUR.bat dosyasına çift tıklayın. (Python yoksa önce onu kurar; o durumda KUR.bat'ı bir daha çalıştırın.)
+  2. İş Takibi > Dosyalar sayfasında "Tekrar dene"ye basın.
+     Tarayıcı "bu cihazdaki uygulamalara erişim" izni isterse "İzin ver" deyin.
+  3. "Seç…" ile proje klasörlerinin bulunduğu ana klasörü seçin.
+
+Pencere açmaz, arka planda çalışır; Windows her açıldığında kendiliğinden başlar.
+Yalnızca seçilen ana klasörün içinde çalışır, sildiğiniz dosyaları "_silinenler" klasörüne taşır.
+Kaldırmak için: %LOCALAPPDATA%\Programs\IsTakibiYardimci\kaldir_yardimci.py
