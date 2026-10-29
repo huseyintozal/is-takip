@@ -73,5 +73,5 @@ do $$ begin
 end $$;
 
 -- 7) İlk yönetici: kendi mail adresin (gerekirse değiştir)
-insert into public.yetkililer (email, rol, ad) values ('huseyinntozal1@gmail.com', 'yonetici', 'Üstad')
+insert into public.yetkililer (email, rol, ad) values ('YONETICI_MAILI@ornek.com', 'yonetici', 'Üstad')
 on conflict (email) do update set rol = 'yonetici';

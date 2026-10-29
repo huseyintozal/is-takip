@@ -6,7 +6,7 @@ Bir kez yapılır, yaklaşık 15 dakika sürer. Hepsi ücretsiz.
 1. https://supabase.com → **Start your project** → GitHub ya da mail ile üye ol.
 2. **New project**: ad `is-takip`, bir veritabanı şifresi belirle (bir yere not et), **Region: Central EU (Frankfurt)** → Create.
 3. Sol menü **SQL Editor** → **New query** → `kurulum.sql` dosyasının tamamını yapıştır → **Run**.
-   (Sondaki satırda ilk yönetici olarak `huseyinntozal1@gmail.com` yazıyor. Başka mail kullanacaksan önce onu değiştir.)
+   (Sondaki satırda ilk yönetici olarak `YONETICI_MAILI@ornek.com` yazıyor. Başka mail kullanacaksan önce onu değiştir.)
 4. **Authentication › URL Configuration › Site URL**: 3. adımda alacağın GitHub adresini yaz
    (örn. `https://kullaniciadin.github.io/is-takip/`). Aynı adresi **Redirect URLs**'e de ekle.
 5. **Project Settings › API**: **Project URL** ve **anon public** anahtarını kopyala.
