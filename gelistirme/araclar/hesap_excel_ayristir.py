@@ -15,10 +15,10 @@ def sayi(v):
     except: return None
 def is_ayir(t):
     t = re.sub(r'\s+', ' ', t).strip()
-    m = re.match(r'^(.*?)\s*(\d+)\s*ADA\s*([\d\-/() ]+?)\s*PARSEL\s*(.*)$', t, re.I)
+    m = re.match(r'^(.*?)\s*(\d+)\s*ADA\s*([\d\-/() ]+?)\s*PARSEL(?:EN\b)?\s*(.*)$', t, re.I)
     if m: on, ada, parsel, son = m.groups()
     else:
-        m = re.match(r'^(.*?)\s*(\d+)\s*PARSEL\s*(.*)$', t, re.I)
+        m = re.match(r'^(.*?)\s*(\d+)\s*PARSEL(?:EN\b)?\s*(.*)$', t, re.I)
         if not m: return None
         on, parsel, son = m.groups(); ada = ''
     on = re.sub(r'\bMAH(ALLESİ)?\b\.?', '', on, flags=re.I).strip(' .')

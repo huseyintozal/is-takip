@@ -68,7 +68,7 @@ const SUZGECLER = {
   bina:    { ad: 'Bina yıkımı bekleyenler',   f: (i, d) => !!d.soru },
   sondaja: { ad: 'Sondaja atılanlar',         f: (i, d) => d.sondajBekliyor },
   sondajyap: { ad: 'Sondaj yapılacaklar (bina yıkıldı)', f: (i, d) => d.biz.includes('sondaj') },
-  me:      { ad: 'Mimari / evrak bekleyenler', f: (i, d) => d.zdIcin },
+  me:      { ad: 'Mimari bekleyenler',        f: (i, d) => d.zdIcin },
   zd:      { ad: 'Zemin değeri verilecekler', f: (i, d) => d.biz.includes('zd') },
   labat:   { ad: 'Laba atılacaklar',          f: (i, d) => d.biz.includes('lab_at') },
   // Tamamlananlar (lab sonucu gelmiş işler) içinde kapanış adımları
@@ -77,12 +77,13 @@ const SUZGECLER = {
   tarama:  { grup: 'tamam', ad: 'Lab taraması bekleyenler', f: (i, d) => d.kimde[0] === 'tamam' && !i.lab_taramasi },
 };
 
-/* İş akışı:  mimari + evrak → zemin değeri (biz) → geo (müşteri) → bina yıkıldı (müşteri bildirir)
+/* İş akışı:  mimari → zemin değeri (biz) → geo (müşteri) → bina yıkıldı (müşteri bildirir)
  *            → sondaj (biz) → laba atılır (biz) → lab sonucu (laboratuvar)
+ *            Evrak zemin değerini beklemez/engellemez: eksikse her aşamada istenir.
  * Kurallar (kullanıcının tarifi):
  *  1-3) Zemin değeri verildiyse: eksik olan mimari / evrak / geo müşteriden istenir.
- *  2)   Zemin değeri verilmedi, mimari + evrak var  → "zemin değeri verilmesi gerekiyor" (bizde, en sonda).
- *  4)   Zemin değeri verilmedi, mimari ya da evrak yok → "zemin değeri vermek için" eksikler istenir (geo henüz istenmez).
+ *  2)   Zemin değeri verilmedi, mimari var → "zemin değeri verilmesi gerekiyor" (bizde, en sonda); evrak yoksa ayrıca istenir.
+ *  4)   Zemin değeri verilmedi, mimari yok → "zemin değeri vermek için" mimari istenir (geo henüz istenmez).
  *  5)   Zemin değeri verildi, sondaj yapılmadı → "sondaj için bina yıkıldı mı?" diye sorulur
  *       (müşteri yıkıldığını bildirdiyse soru yerine "sondaj yapılacak" bizde görünür).
  *  6)   Sondaj yapıldı, laba atılmadı → "laba atılmadı" (bizde). Atıldı, sonuç gelmedi → "lab bekliyor" (laboratuvar). */
@@ -92,7 +93,8 @@ function isDurumu(i) {
   if (!i.sondaj && i.sondaja_atildi) d.sondajBekliyor = true;
   const eksikME = ['mimari', 'evrak'].filter(a => !i[a]);
   if (!i.zemin_degeri) {
-    if (eksikME.length) { d.istenen = eksikME; d.zdIcin = true; }          // kural 4
+    d.istenen = eksikME;                                                     // evrak her durumda istenir
+    if (!i.mimari) d.zdIcin = true;                                          // kural 4
     else d.biz.push('zd');                                                  // kural 2
   } else {
     d.istenen = [...eksikME, ...(i.geo ? [] : ['geo'])];                     // kural 1, 3
@@ -161,8 +163,11 @@ const ISTENEN_AD = { mimari: 'mimari', evrak: 'evrak', geo: 'geo' };
 function isMesajlari(i, d = isDurumu(i)) {
   const k = kimlik(i), m = [];
   const ist = `istenen (${d.istenen.map(a => ISTENEN_AD[a]).join(', ')})`;
-  if (d.zdIcin) m.push({ tur: 'musteri', grup: 'zd', metin: `${k} ${ist}` });
-  else if (d.istenen.length) m.push({ tur: 'musteri', grup: 'belge', metin: `${k} ${ist}` });
+  if (d.zdIcin) {
+    m.push({ tur: 'musteri', grup: 'zd', metin: `${k} istenen (mimari)` });
+    const diger = d.istenen.filter(a => a !== 'mimari');
+    if (diger.length) m.push({ tur: 'musteri', grup: 'belge', metin: `${k} istenen (${diger.map(a => ISTENEN_AD[a]).join(', ')})` });
+  } else if (d.istenen.length) m.push({ tur: 'musteri', grup: 'belge', metin: `${k} ${ist}` });
   // bina sorusu ayrı satır; raporda kendi başlığı altında yalnızca mal sahibi (ada/parsel) yazılır
   if (d.soru) m.push({ tur: 'musteri', grup: 'soru', metin: `${k} ${d.soru}`, rapor: k });
   if (d.biz.includes('zd')) m.push({ tur: 'biz', grup: 'zd', metin: `${k} zemin değeri verilmesi gerekiyor` });
@@ -331,7 +336,7 @@ function hucre(i, alan, d) {
   if (alan === 'sondaj' && !i.sondaj && i.sondaja_atildi)
     return `<button class="dd atildi${ek}" data-dd="sondaj" title="Sondaja atıldı, sonucu bekleniyor${notBaslik} (tıklayın)">${ikon('saat')}</button>`;
   const beklenen = {          // eksikse kırmızı görünsün mü? (henüz sırası gelmeyen adım gri kalır)
-    mimari: true, evrak: true, zemin_degeri: i.mimari && i.evrak, geo: i.zemin_degeri, sondaj: i.bina_yikildi === 'evet',
+    mimari: true, evrak: true, zemin_degeri: !!i.mimari, geo: i.zemin_degeri, sondaj: i.bina_yikildi === 'evet',
     laba_atildi: i.sondaj, lab: i.laba_atildi, riskli_rapor: false,
     rapor_yazildi: d.kimde[0] === 'tamam', imza_cd: d.kimde[0] === 'tamam', lab_taramasi: d.kimde[0] === 'tamam',
   }[alan];
@@ -598,7 +603,7 @@ async function isSayfasi(iid, onIsveren) {
             <div class="alan"><label>Raporu hazırlayan firma</label>${firmaAlani}<div class="ipucu">firma_id</div></div>
             <div class="alan genis"><label>Notlar</label><textarea class="girdi" data-a="notlar" rows="2">${esc(f.notlar)}</textarea></div>
           </div>${dl('dlIsveren', isverenler().map(isverenAdi))}${dl('dlMahalle', mahalleler)}</div></div>
-        <div class="kart"><div class="kart-bas"><h2>İş akışı</h2><span class="aciklama">Mimari ve evrak → zemin değeri → geo → bina yıkımı → sondaj → lab</span></div>
+        <div class="kart"><div class="kart-bas"><h2>İş akışı</h2><span class="aciklama">Mimari → zemin değeri → evrak ve geo → bina yıkımı → sondaj → lab</span></div>
           <div id="durumlar"></div></div>
       </div>
       <div class="yan yigin">
@@ -678,9 +683,9 @@ function durumlariCiz() {
 
 function adimCubugu(i) {
   const A = [
-    ['Mimari ve evrak', 'Müşteriden', i.mimari && i.evrak],
+    ['Mimari', 'Müşteriden', i.mimari],
     ['Zemin değeri', 'Bizden', i.zemin_degeri],
-    ['Geo', 'Müşteriden', i.geo],
+    ['Evrak ve geo', 'Müşteriden', i.evrak && i.geo],
     ['Sondaj', i.sondaja_atildi && !i.sondaj ? 'Sondaja atıldı' : binaYikik(i) ? 'Bina yıkıldı' : 'Bina yıkılınca', i.sondaj],
     ['Lab', i.laba_atildi ? 'Laboratuvarda' : 'Laba gönderilir', i.laba_atildi && i.lab],
     ['Rapor ve teslim', BITIS_ALANLARI.filter(a => i[a]).length + '/3 · rapor, imza-CD, tarama', BITIS_ALANLARI.every(a => i[a])],
