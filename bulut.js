@@ -5,7 +5,7 @@
  *  - is_takip.js'in çağırdığı api('GET', 'is_takip/isler') gibi istekler burada Supabase'e çevrilir,
  *    böylece arayüz kodu masaüstü sürümüyle aynı kalır. */
 
-const WEB_SURUM = 'B1.13.0';
+const WEB_SURUM = 'B1.13.1';
 const D = { durum: null, firmalar: null };
 const BULUT = { sb: null, eposta: '', rol: '', isler: new Map(), canli: 'bekliyor', tazeleZaman: null, bekleyenTazele: false };
 
@@ -44,6 +44,19 @@ async function isleriIndir() {
     if (data.length < 1000) break;
   }
   BULUT.isler = new Map(liste.map(r => [r.id, isGoc(Object.assign({}, r.veri, { id: r.id }))]));
+  // B1.13: tarama alanı ikiye ayrıldı; göçü yapılmamış kayıtlar veritabanına bir kez yazılır
+  const gocu = liste.filter(r => r.veri && r.veri.tarama_geldi === undefined).map(r => r.id);
+  if (gocu.length && ['yonetici', 'duzenle'].includes(BULUT.rol) && !BULUT.taramaGocu) {
+    BULUT.taramaGocu = true;
+    (async () => {
+      for (const id of gocu) {
+        const i = BULUT.isler.get(id); if (!i) continue;
+        const { error } = await BULUT.sb.rpc('is_guncelle', { p_id: id, p_alanlar: { tarama_geldi: i.tarama_geldi, lab_taramasi: i.lab_taramasi }, p_gecmis: [] });
+        if (error) { console.error('tarama göçü', id, error); break; }
+      }
+      BULUT.taramaGocu = false;
+    })();
+  }
 }
 async function isGuncelleBulut(id, govde) {
   const eski = BULUT.isler.get(id);
@@ -52,6 +65,7 @@ async function isGuncelleBulut(id, govde) {
   const alanlar = { guncelleme: yeni.guncelleme };
   Object.keys(govde).forEach(a => { if (a in yeni && a !== 'gecmis' && a !== 'id') alanlar[a] = yeni[a]; });
   alanlar.bos_alanlar = yeni.bos_alanlar;
+  alanlar.tarama_geldi = yeni.tarama_geldi; alanlar.lab_taramasi = yeni.lab_taramasi;    // göçü yapılmamış kayıtta ikisi de yazılsın
   if ('alan_notlari' in govde) alanlar.alan_notlari = yeni.alan_notlari;
   const { data, error } = await BULUT.sb.rpc('is_guncelle', { p_id: id, p_alanlar: alanlar, p_gecmis: gecmisEk });
   if (error) throw sbHata(error);

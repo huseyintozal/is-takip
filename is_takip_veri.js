@@ -38,7 +38,9 @@ function bosIsKaydi() {
 function isGoc(i) {
   i = Object.assign({}, i);
   VERI_METIN.forEach(a => { if (i[a] === undefined || i[a] === null) i[a] = ''; });
-  if (i.tarama_geldi === undefined) i.tarama_geldi = !!i.lab_taramasi;      // eski kayıt: taranmışsa tarama gelmiştir
+  // eski kayıt (B1.13 öncesi): "tarandı" olanlar artık "tarama geldi"; "tarama yapıldı"ya ayrıca bakılacak.
+  // Geçmiş (yalnızca mali) kayıtlar bitmiş işlerdir, ikisi de tamam kalır.
+  if (i.tarama_geldi === undefined) { i.tarama_geldi = !!i.lab_taramasi; if (!i.mali_kayit) i.lab_taramasi = false; }
   VERI_DURUM.forEach(a => { if (i[a] === undefined) i[a] = false; });
   if (!('sondaja_atildi' in i) || i.sondaja_atildi === undefined)
     i.sondaja_atildi = !!(!i.sondaj && (i.alan_notlari || {}).sondaj);
@@ -63,7 +65,6 @@ function isTemizle(gelen, eski, kim = '') {
     if (eski && !!eski[a] !== v) { ekle({ zaman, alan: a, deger: v }); bos.delete(a); }
     i[a] = v;
   });
-  if (gelen.lab_taramasi && !('tarama_geldi' in gelen) && !i.tarama_geldi) i.tarama_geldi = true;   // taranmışsa tarama gelmiştir
   i.bos_alanlar = VERI_DURUM.filter(a => bos.has(a));
   if ('bina_yikildi' in gelen) {
     const v = ['', 'evet', 'hayir'].includes(gelen.bina_yikildi) ? gelen.bina_yikildi : '';
