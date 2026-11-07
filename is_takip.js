@@ -813,6 +813,16 @@ function raporMetinleri(isler, isveren, baslikli) {
   const biz = duz('biz');
   if (biz.length) sonuc.biz = bolumle('biz', biz, !isveren);
   sonuc.labSayi = lab.length; sonuc.bizSayi = biz.length;
+  // kapanış: lab sonucu gelmiş işlerde rapor, imza-CD, lab taraması
+  const KAPANIS = { rapor_yazildi: 'Rapor yazılacak', imza_cd: 'İmza-CD bekleyenler', lab_taramasi: 'Lab taraması bekleyenler' };
+  const kapanan = isler.map(i => ({ i, d: isDurumu(i) })).filter(x => x.d.bitisEksik.length);
+  sonuc.kapanis = BITIS_ALANLARI.map(a => {
+    const s = kapanan.filter(x => x.d.bitisEksik.includes(a))
+      .sort((x, y) => trSirala(ik(x.i.isveren), ik(y.i.isveren)) || trSirala(kimlik(x.i), kimlik(y.i)))
+      .map(x => `- ${kimlik(x.i)}${!isveren ? ` – ${isverenAdi(ik(x.i.isveren))}` : ''}`);
+    return s.length ? `${KAPANIS[a]}:\n${s.join('\n')}` : '';
+  }).filter(Boolean).join('\n\n');
+  sonuc.kapanisSayi = kapanan.length;
   return sonuc;
 }
 
@@ -822,12 +832,12 @@ async function raporSayfasi(isveren) {
   const baslikli = depoOku('raporBaslik', true);
   const isler = isveren ? IT.isler.filter(i => ik(i.isveren) === isveren) : IT.isler;
   const r = raporMetinleri(isler, isveren, baslikli);
-  const hepsi = [...r.musteri.map(x => x.metin), r.sondaj, r.lab, r.biz ? 'BİZDE:\n\n' + r.biz : ''].filter(Boolean).join('\n\n— — —\n\n');
+  const hepsi = [...r.musteri.map(x => x.metin), r.sondaj, r.lab, r.biz ? 'BİZDE:\n\n' + r.biz : '', r.kapanis ? 'KAPANIŞ:\n\n' + r.kapanis : ''].filter(Boolean).join('\n\n— — —\n\n');
   const bolumKart = (baslik, aciklama, metin, sinif = '') => `<div class="kart rapor-bolum">
       <div class="kart-bas"><div><h2>${baslik}</h2><div class="aciklama">${aciklama}</div></div><div class="bosluk"></div>
         ${kopyaDugmesi(metin, 'dugme kucuk' + (sinif ? ' ' + sinif : ''), 'Kopyala')}</div>
       <div class="kart-ic"><pre class="rapor-metin">${esc(metin)}</pre></div></div>`;
-  const bos = !r.musteri.length && !r.lab && !r.biz && !r.sondaj;
+  const bos = !r.musteri.length && !r.lab && !r.biz && !r.sondaj && !r.kapanis;
   sayfaYaz(`
     <div class="ust">${isveren ? `<a class="geri" href="#/isler/${encodeURIComponent(isveren)}" title="İşlere dön">${ikon('geri')}</a>` : ''}
       <div><h1>${isveren ? esc(isverenAdi(isveren)) + ' raporu' : 'İşveren raporu'}</h1>
@@ -838,14 +848,15 @@ async function raporSayfasi(isveren) {
       ${!bos ? kopyaDugmesi(hepsi, 'dugme ana', 'Tümünü kopyala') : ''}</div>
     <div class="kart" style="margin-bottom:16px"><div class="kart-ic rapor-secenek">
       <label class="secim"><input type="checkbox" id="baslikli" ${baslikli ? 'checked' : ''}> Mesajın başına işveren adı ve tarih yaz</label>
-      <span class="soluk kucuk-yazi">Sıra: önce işverene gidecekler, sonra sondaj ve laboratuvar, en sonda bizde olanlar.</span></div></div>
+      <span class="soluk kucuk-yazi">Sıra: önce işverene gidecekler, sonra sondaj ve laboratuvar, bizde olanlar, en sonda kapanış.</span></div></div>
     ${bos ? `<div class="kutu basari">${ikon('tamam')}<div>${isveren ? esc(isverenAdi(isveren)) + ' için' : 'Hiçbir işte'} bekleyen bir şey yok. Bütün işler tamam.</div></div>` : ''}
     ${r.musteri.map(x => bolumKart(`${esc(x.isveren)} <span class="etiket sari" style="margin-left:6px">işverene</span>`,
       `${x.sayi} iş için istenenler ve sorular. Kopyalayıp işverene gönderin.`, x.metin)).join('')}
     ${r.sondaj ? bolumKart(`Sondaj <span class="etiket" style="margin-left:6px">${r.sondajSayi}</span>`, 'Sondajcıya verilmiş (ÖMERE ATILDI gibi) ama sondajı yapılmamış işler', r.sondaj) : ''}
     ${r.lab ? bolumKart(`Laboratuvar <span class="etiket vurgu" style="margin-left:6px">${r.labSayi}</span>`, 'Sondajı yapılmış, laba atılmış ama sonucu gelmemiş işler', r.lab) : ''}
     ${r.labKisa ? bolumKart(`Laboratuvara gönder <span class="etiket vurgu" style="margin-left:6px">${r.labSayi}</span>`, 'Yalnızca ada / parsel, kopyalayıp doğrudan laboratuvara gönderin', r.labKisa) : ''}
-    ${r.biz ? bolumKart(`Bizde <span class="etiket turuncu" style="margin-left:6px">${r.bizSayi}</span>`, 'Sizin yapacaklarınız: zemin değeri, sondaj, laba gönderme', r.biz) : ''}`);
+    ${r.biz ? bolumKart(`Bizde <span class="etiket turuncu" style="margin-left:6px">${r.bizSayi}</span>`, 'Sizin yapacaklarınız: zemin değeri, sondaj, laba gönderme', r.biz) : ''}
+    ${r.kapanis ? bolumKart(`Kapanış <span class="etiket yesil" style="margin-left:6px">${r.kapanisSayi}</span>`, 'Lab sonucu gelmiş işler: rapor yazılacak, imza-CD, lab taraması', r.kapanis) : ''}`);
   kopyaBagla();
   $('#raporIsveren').onchange = e => { location.hash = '#/isler/rapor/' + encodeURIComponent(e.target.value); };
   $('#baslikli').onchange = e => { depoYaz('raporBaslik', e.target.checked); raporSayfasi(isveren); };
