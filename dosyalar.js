@@ -533,7 +533,7 @@ async function dosyalarSayfasi() {
       <div class="kart-ic yigin">${y ? `
         <div class="sistem-satir" style="padding:0"><div class="durum-ikon ok">${ikon('tamam')}</div>
           <div style="flex:1"><b>Dosya Yardımcısı çalışıyor</b><div class="soluk kucuk-yazi">Bilgisayar: ${esc(y.pc)} · sürüm ${esc(y.surum)}</div>
-          ${y.surum < '1.3.1' ? `<div class="kucuk-yazi" style="margin-top:4px"><b>Yeni sürüm var:</b> <a href="dosya_yardimcisi.zip" download>dosya_yardimcisi.zip</a>'i indirip içindeki KUR.bat'ı tekrar çalıştırın (alt klasörler, klasör seçme ve taşınan klasör takibi için).</div>` : ''}</div></div>
+          ${y.surum < '1.3.2' ? `<div class="kucuk-yazi" style="margin-top:4px"><b>Yeni sürüm var:</b> <a href="dosya_yardimcisi.zip" download>dosya_yardimcisi.zip</a>'i indirip içindeki KUR.bat'ı tekrar çalıştırın (açılan klasör ve dosyalar öne gelsin diye).</div>` : ''}</div></div>
         <div class="alan"><label>Ana klasör (proje klasörlerinin bulunduğu yer)</label>
           <div style="display:flex;gap:8px;flex-wrap:wrap"><input class="girdi" id="kokYol" value="${esc(y.kok || '')}" placeholder="C:\\Users\\...\\ZEMİN ETÜT RAPORLARI" style="flex:1;min-width:260px">
           <button class="dugme" id="kokSec">${ikon('klasor')}Seç…</button><button class="dugme" id="kokKaydet">Kaydet</button></div>

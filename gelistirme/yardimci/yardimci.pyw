@@ -22,7 +22,7 @@ from datetime import datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
-SURUM = '1.3.1'
+SURUM = '1.3.2'
 PORT = int(os.environ.get('IS_TAKIP_YARDIMCI_PORT', '8767'))
 AYAR_KL = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'IsTakibi')
 AYAR = os.path.join(AYAR_KL, 'yardimci.json')
@@ -206,9 +206,89 @@ def benzersiz(yol):
     return '%s (%d)%s' % (kok_, n, uz)
 
 
+def _pencereler():
+    """Görünür, başlıklı üst düzey pencereler: {hwnd: başlık}"""
+    import ctypes
+    from ctypes import wintypes
+    u = ctypes.windll.user32
+    sonuc = {}
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def say(h, _):
+        n = u.GetWindowTextLengthW(h)
+        if n and u.IsWindowVisible(h) and not u.GetWindow(h, 4):      # 4 = GW_OWNER: sahipli (açılır) pencere değil
+            b = ctypes.create_unicode_buffer(n + 1)
+            u.GetWindowTextW(h, b, n + 1)
+            sonuc[h] = b.value
+        return True
+    u.EnumWindows(say, 0)
+    return sonuc
+
+
+def _one_getir(h):
+    """Windows arka plandaki programın açtığı pencereyi öne getirmez (görev çubuğunda yanıp söner);
+    öndeki pencerenin iş parçacığına bağlanıp, olmazsa Alt tuşu hilesiyle öne alır."""
+    import ctypes
+    from ctypes import wintypes
+    u = ctypes.windll.user32
+    k = ctypes.windll.kernel32
+    u.SetForegroundWindow.argtypes = u.BringWindowToTop.argtypes = u.IsIconic.argtypes = [wintypes.HWND]
+    u.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    u.GetForegroundWindow.restype = wintypes.HWND
+    u.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.c_void_p]
+    on = u.GetForegroundWindow()
+    if on == h:
+        return
+    bu, ondeki = k.GetCurrentThreadId(), u.GetWindowThreadProcessId(on, None)
+    bagli = ondeki and ondeki != bu and u.AttachThreadInput(bu, ondeki, True)
+    try:
+        if u.IsIconic(h):
+            u.ShowWindow(h, 9)          # SW_RESTORE
+        u.BringWindowToTop(h)
+        u.SetForegroundWindow(h)
+    finally:
+        if bagli:
+            u.AttachThreadInput(bu, ondeki, False)
+    if u.GetForegroundWindow() != h:
+        u.keybd_event(0x12, 0, 0, 0)    # Alt bas-bırak: Windows öne almaya izin verir
+        u.keybd_event(0x12, 0, 2, 0)
+        u.SetForegroundWindow(h)
+
+
+def _acilani_one_getir(onceki, ad):
+    """Açılan pencereyi bekler (en çok 6 sn) ve öne getirir: önce yeni çıkan pencere,
+    yoksa (klasör zaten açıksa) başlığında klasör/dosya adı geçen pencere."""
+    import time
+    ad = ad.lower()
+    bas = time.time()
+    while time.time() - bas < 6:
+        time.sleep(0.15)
+        simdi = _pencereler()
+        yeni = [h for h in simdi if h not in onceki]
+        if not yeni and time.time() - bas > 1.5:
+            yeni = [h for h, t in simdi.items() if ad and ad in t.lower()]
+        if yeni:
+            time.sleep(0.2)
+            _one_getir(yeni[0])
+            return
+
+
 def ac(yol):
     if os.name == 'nt':
+        onceki = {}
+        try:
+            onceki = _pencereler()
+        except Exception:
+            gunluk('pencere listesi alınamadı', traceback.format_exc())
         os.startfile(yol)
+        ad = os.path.splitext(os.path.basename(os.path.normpath(yol)))[0] if os.path.isfile(yol) else os.path.basename(os.path.normpath(yol))
+
+        def one():
+            try:
+                _acilani_one_getir(onceki, ad)
+            except Exception:
+                gunluk('öne getirilemedi', traceback.format_exc())
+        threading.Thread(target=one, daemon=True).start()
     elif sys.platform == 'darwin':
         subprocess.Popen(['open', yol])
     else:
