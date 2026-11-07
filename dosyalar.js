@@ -141,7 +141,7 @@ async function klasorDosyalariniEkle(isId, klasor, bulut = false) {
   const { dosyalar } = await yardimci(`/liste?klasor=${encodeURIComponent(klasor)}&alt=1`, { sure: 60000 });
   const var_ = new Set(isDosyalari(isId).map(d => d.ad));
   let dosya = 0, bulutta = 0;
-  for (const f of dosyalar.filter(f => !var_.has(f.ad))) {
+  await havuz(dosyalar.filter(f => !var_.has(f.ad)), 3, async f => {
     let yol = null;
     if (bulut) {
       try {
@@ -154,7 +154,7 @@ async function klasorDosyalariniEkle(isId, klasor, bulut = false) {
       tur: '', bulut_yolu: yol, pc: buCihaz(), ekleyen: BULUT.eposta }).select().single();
     if (error) throw sbHata(error);
     DOSYA.satirlar.set(data.id, data); dosya++;
-  }
+  });
   return { dosya, bulutta };
 }
 /* İş sayfasından: bilgisayardaki herhangi bir klasörü bu işe bağla */
@@ -197,11 +197,35 @@ function kategoriTahmin(ad) {
   if (/\bGEO|JEOLOJ|JEOFIZ|MASW/.test(s)) return 'geo';
   return 'diger';
 }
-async function bulutaKoy(isId, blob, ad) {
+/* Depolamaya doğrudan XHR ile yükler: yüklenen bayt sayısı (ilerleme) görülebilsin diye */
+async function xhrYukle(anahtar, blob, ilerleme) {
+  const { data } = await BULUT.sb.auth.getSession();
+  const jeton = data && data.session && data.session.access_token;
+  return new Promise(coz => {
+    const x = new XMLHttpRequest();
+    x.open('POST', `${String(BULUT.sb.supabaseUrl).replace(/\/+$/, '')}/storage/v1/object/dosyalar/${anahtar.split('/').map(encodeURIComponent).join('/')}`);
+    x.setRequestHeader('apikey', BULUT.sb.supabaseKey);
+    x.setRequestHeader('Authorization', 'Bearer ' + (jeton || BULUT.sb.supabaseKey));
+    x.setRequestHeader('Content-Type', blob.type || 'application/octet-stream');
+    x.setRequestHeader('x-upsert', 'false');
+    x.setRequestHeader('cache-control', 'max-age=3600');
+    if (ilerleme) x.upload.onprogress = e => ilerleme(e.loaded);
+    x.onload = () => {
+      if (x.status >= 200 && x.status < 300) return coz({ error: null });
+      let m = x.statusText; try { const j = JSON.parse(x.responseText); m = j.message || j.error || m; } catch (e) { /* düz metin */ }
+      coz({ error: { message: m || 'Yükleme hatası ' + x.status } });
+    };
+    x.onerror = () => coz({ error: { message: 'bağlantı koptu' } });
+    x.send(blob);
+  });
+}
+async function bulutaKoy(isId, blob, ad, ilerleme) {
   if (blob.size > DOSYA_SINIR) return { hata: `dosya ${boyutYaz(DOSYA_SINIR)}'tan büyük` };
   if (DOSYA.kullanim !== null && DOSYA.kullanim + blob.size > BULUT_SINIR) return { hata: 'bulut doldu' };
   const anahtar = `${isId}/${crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(16).slice(2)}${uzantiAl(ad) ? '.' + uzantiAl(ad) : ''}`;
-  const { error } = await BULUT.sb.storage.from('dosyalar').upload(anahtar, blob, { contentType: blob.type || 'application/octet-stream', upsert: false });
+  const { error } = BULUT.sb.supabaseUrl && BULUT.sb.supabaseKey ? await xhrYukle(anahtar, blob, ilerleme)
+    : await BULUT.sb.storage.from('dosyalar').upload(anahtar, blob, { contentType: blob.type || 'application/octet-stream', upsert: false });
+  if (ilerleme) ilerleme(blob.size);
   if (error) return { hata: /exceeded|quota|too large|payload/i.test(error.message) ? 'bulut doldu ya da dosya çok büyük' : error.message };
   if (DOSYA.kullanim !== null) DOSYA.kullanim += blob.size;
   return { yol: anahtar };
@@ -221,6 +245,25 @@ function birakilanDosyalar(dt) {
   }
   return (async () => { const cikti = []; for (const g of girdiler) await topla(g, cikti, ''); return cikti; })();
 }
+/* liste'yi aynı anda en çok n iş yürüterek işler (yüklemeler sırayla değil birkaç dosya birden gider) */
+async function havuz(liste, n, f) {
+  let sira = 0;
+  await Promise.all(Array.from({ length: Math.min(n, liste.length) }, async () => { while (sira < liste.length) { const k = sira++; await f(liste[k], k); } }));
+}
+/* Yükleme ilerlemesi: "3 dosya · 4,2 MB / 9,8 MB (%43) · 1,1 MB/sn" */
+function ilerlemeSayaci(dosyalar, yaz) {
+  const yuklenen = new Map(), toplam = dosyalar.reduce((t, d) => t + (d.size || 0), 0), bas = Date.now();
+  let biten = 0, son = 0;
+  const ciz = () => {
+    const y = [...yuklenen.values()].reduce((t, v) => t + v, 0), sn = (Date.now() - bas) / 1000;
+    yaz(`${dosyalar.length > 1 ? `${biten}/${dosyalar.length} dosya · ` : ''}${boyutYaz(y)} / ${boyutYaz(toplam)} (%${toplam ? Math.floor(y * 100 / toplam) : 100})${sn > 1 ? ` · ${boyutYaz(y / sn)}/sn` : ''} yükleniyor…`);
+  };
+  ciz();
+  return {
+    ilerle: (d, b) => { yuklenen.set(d, b); if (Date.now() - son > 300) { son = Date.now(); ciz(); } },
+    bitti: d => { yuklenen.set(d, d.size || 0); biten++; ciz(); },
+  };
+}
 /* Dosyaları işe ekler: bilgisayara (yardımcı varsa) + buluta (açıksa ve yer varsa) */
 async function dosyaEkle(isId, kategori, dosyalar) {
   if (saltOkunur()) return bildir('Yalnızca görüntüleme yetkiniz var', 'hata');
@@ -231,29 +274,29 @@ async function dosyaEkle(isId, kategori, dosyalar) {
   if (!pcde && !bulut) return bildir('Bu cihazda dosya kaydedilecek yer yok: Dosya Yardımcısı yok ve buluta yükleme kapalı', 'hata');
   let klasor = '';
   if (pcde) { try { klasor = await isKlasoru(i); } catch (e) { return hataGoster(e); } }
-  const durum = $('#dosyaDurum');
   let tamam = 0; const uyarilar = [];
-  for (const d of dosyalar) {
-    if (durum) durum.textContent = `${d.name} yükleniyor… (${tamam + 1}/${dosyalar.length})`;
+  const sayac = ilerlemeSayaci(dosyalar, m => { const k = $('#dosyaDurum'); if (k) k.textContent = m; });
+  await havuz(dosyalar, 3, async d => {
     const katKlasor = (KATEGORI.find(k => k[0] === kategori) || [])[3];
     let alt = d.altKlasor || '';
     if (katKlasor && katla(alt.split('/')[0]) !== katla(katKlasor)) alt = katKlasor + (alt ? '/' + alt : '');
     let ad = (alt ? alt + '/' : '') + d.name, pcOk = false, yol = null;
-    if (pcde) {
-      try { const y = yerAyir(klasor, ad); const r = await yardimci(`/yaz?klasor=${encodeURIComponent(y.klasor)}&ad=${encodeURIComponent(y.ad)}`, { govde: d, sure: 120000 }); ad = (alt ? alt + '/' : '') + r.ad; pcOk = true; }
+    // bilgisayara yazma ile buluta yükleme aynı anda
+    const pcIs = pcde ? (async () => {
+      try { const y = yerAyir(klasor, ad); const r = await yardimci(`/yaz?klasor=${encodeURIComponent(y.klasor)}&ad=${encodeURIComponent(y.ad)}`, { govde: d, sure: 120000 }); pcOk = true; return (alt ? alt + '/' : '') + r.ad; }
       catch (e) { uyarilar.push(`${d.name}: bilgisayara yazılamadı (${e.message})`); }
-    }
-    if (bulut) {
-      const b = await bulutaKoy(isId, d, ad);
-      if (b.yol) yol = b.yol; else uyarilar.push(`${d.name}: buluta yüklenmedi (${b.hata})${pcOk ? ', yalnızca bilgisayarda' : ''}`);
-    }
-    if (!pcOk && !yol) continue;
+    })() : null;
+    const b = bulut ? await bulutaKoy(isId, d, ad, n => sayac.ilerle(d, n)) : null;
+    const pcAd = await pcIs; if (pcAd) ad = pcAd;
+    sayac.bitti(d);
+    if (b) { if (b.yol) yol = b.yol; else uyarilar.push(`${d.name}: buluta yüklenmedi (${b.hata})${pcOk ? ', yalnızca bilgisayarda' : ''}`); }
+    if (!pcOk && !yol) return;
     const satir = { is_id: isId, kategori, ad, boyut: d.size, tur: d.type || '', bulut_yolu: yol, pc: pcOk ? buCihaz() : '', ekleyen: BULUT.eposta };
     const { data, error } = await BULUT.sb.from('dosyalar').insert(satir).select().single();
-    if (error) { uyarilar.push(`${d.name}: listeye eklenemedi (${sbHata(error).message})`); continue; }
+    if (error) { uyarilar.push(`${d.name}: listeye eklenemedi (${sbHata(error).message})`); return; }
     DOSYA.satirlar.set(data.id, data); tamam++;
-  }
-  if (durum) durum.textContent = '';
+  });
+  if ($('#dosyaDurum')) $('#dosyaDurum').textContent = '';
   if (pcde && klasor) yardimci('/isaretle', { json: { liste: [{ klasor, is_id: isId }] } }).then(r => gorulduYaz(r.var || [])).catch(() => {});
   dosyaKartiCiz(isId);
   if (uyarilar.length) bildir(uyarilar.join(' · '), 'hata');
