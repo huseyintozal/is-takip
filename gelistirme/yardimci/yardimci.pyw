@@ -22,7 +22,7 @@ from datetime import datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
-SURUM = '1.3.2'
+SURUM = '1.3.3'
 PORT = int(os.environ.get('IS_TAKIP_YARDIMCI_PORT', '8767'))
 AYAR_KL = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'IsTakibi')
 AYAR = os.path.join(AYAR_KL, 'yardimci.json')
@@ -226,51 +226,61 @@ def _pencereler():
 
 
 def _one_getir(h):
-    """Windows arka plandaki programın açtığı pencereyi öne getirmez (görev çubuğunda yanıp söner);
-    öndeki pencerenin iş parçacığına bağlanıp, olmazsa Alt tuşu hilesiyle öne alır."""
+    """Windows arka plandaki programın açtığı pencereyi öne getirmez (görev çubuğunda yanıp söner).
+    Alt tuşu bas-bırak ile "son girdi bizden" olur, öndeki pencerenin iş parçacığına bağlanılır,
+    sonra öne alınır; olmazsa SwitchToThisWindow denenir. Öne geldiyse True."""
     import ctypes
+    import time
     from ctypes import wintypes
     u = ctypes.windll.user32
     k = ctypes.windll.kernel32
     u.SetForegroundWindow.argtypes = u.BringWindowToTop.argtypes = u.IsIconic.argtypes = [wintypes.HWND]
+    u.SwitchToThisWindow.argtypes = [wintypes.HWND, wintypes.BOOL]
     u.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
-    u.GetForegroundWindow.restype = wintypes.HWND
     u.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.c_void_p]
-    on = u.GetForegroundWindow()
-    if on == h:
-        return
-    bu, ondeki = k.GetCurrentThreadId(), u.GetWindowThreadProcessId(on, None)
-    bagli = ondeki and ondeki != bu and u.AttachThreadInput(bu, ondeki, True)
-    try:
-        if u.IsIconic(h):
-            u.ShowWindow(h, 9)          # SW_RESTORE
-        u.BringWindowToTop(h)
-        u.SetForegroundWindow(h)
-    finally:
-        if bagli:
-            u.AttachThreadInput(bu, ondeki, False)
-    if u.GetForegroundWindow() != h:
-        u.keybd_event(0x12, 0, 0, 0)    # Alt bas-bırak: Windows öne almaya izin verir
+    u.GetForegroundWindow.restype = wintypes.HWND
+    for deneme in range(3):
+        if u.GetForegroundWindow() == h:
+            return True
+        u.keybd_event(0x12, 0, 0, 0)    # Alt bas-bırak
         u.keybd_event(0x12, 0, 2, 0)
-        u.SetForegroundWindow(h)
+        on = u.GetForegroundWindow()
+        bu, ondeki = k.GetCurrentThreadId(), (u.GetWindowThreadProcessId(on, None) if on else 0)
+        bagli = ondeki and ondeki != bu and u.AttachThreadInput(bu, ondeki, True)
+        try:
+            u.ShowWindow(h, 9 if u.IsIconic(h) else 5)     # SW_RESTORE / SW_SHOW
+            u.BringWindowToTop(h)
+            u.SetForegroundWindow(h)
+        finally:
+            if bagli:
+                u.AttachThreadInput(bu, ondeki, False)
+        time.sleep(0.1)
+        if u.GetForegroundWindow() == h:
+            return True
+        u.SwitchToThisWindow(h, True)
+        time.sleep(0.2)
+    return u.GetForegroundWindow() == h
 
 
 def _acilani_one_getir(onceki, ad):
-    """Açılan pencereyi bekler (en çok 6 sn) ve öne getirir: önce yeni çıkan pencere,
-    yoksa (klasör zaten açıksa) başlığında klasör/dosya adı geçen pencere."""
+    """Açılan pencereyi bekler (en çok 8 sn) ve öne getirir: yeni çıkan pencere ya da
+    (Windows 11'de klasör var olan pencerede sekme olarak açılınca) başlığı klasör/dosya adı olan pencere."""
     import time
     ad = ad.lower()
     bas = time.time()
-    while time.time() - bas < 6:
+    while time.time() - bas < 8:
         time.sleep(0.15)
         simdi = _pencereler()
         yeni = [h for h in simdi if h not in onceki]
-        if not yeni and time.time() - bas > 1.5:
-            yeni = [h for h, t in simdi.items() if ad and ad in t.lower()]
+        if not yeni and ad:
+            # başlığı değişen (sekme) ya da zaten açık olan pencere
+            yeni = [h for h, t in simdi.items() if ad in t.lower() and (onceki.get(h) != t or time.time() - bas > 1.5)]
         if yeni:
-            time.sleep(0.2)
-            _one_getir(yeni[0])
+            time.sleep(0.25)
+            ok = _one_getir(yeni[0])
+            gunluk('aç: öne getir', repr(simdi.get(yeni[0])), 'tamam' if ok else 'OLMADI')
             return
+    gunluk('aç: açılan pencere bulunamadı', repr(ad))
 
 
 def ac(yol):
