@@ -30,9 +30,9 @@ const saltOkunur = () => !!(D.durum && D.durum.salt_okunur);
 
 // ------------------------------------------------------------------ durum
 const IT = { isler: null, projeler: null, firmalar: null, form: null, degisti: false, kopyalar: [] };
-const DURUM_ALANLARI = ['mimari', 'evrak', 'zemin_degeri', 'geo', 'sondaj', 'sondaja_atildi', 'laba_atildi', 'lab', 'riskli_rapor', 'rapor_yazildi', 'imza_cd', 'lab_taramasi'];
+const DURUM_ALANLARI = ['mimari', 'evrak', 'zemin_degeri', 'geo', 'sondaj', 'sondaja_atildi', 'laba_atildi', 'lab', 'riskli_rapor', 'rapor_yazildi', 'imza_cd', 'tarama_geldi', 'lab_taramasi'];
 /* Tamamlanan işin (lab sonucu geldikten sonra) kapanış adımları, bu sırayla */
-const BITIS_ALANLARI = ['rapor_yazildi', 'imza_cd', 'lab_taramasi'];
+const BITIS_ALANLARI = ['rapor_yazildi', 'imza_cd', 'tarama_geldi', 'lab_taramasi'];
 const ALAN = {
   mimari:       { ad: 'Mimari',       kisa: 'Mimari', soru: 'Mimari proje geldi mi?',               e: 'Var',     h: 'Yok', ornek: '3.20 İNECEK' },
   evrak:        { ad: 'Evrak',        kisa: 'Evrak',  soru: 'Evraklar geldi mi?',                   e: 'Var',     h: 'Yok', ornek: 'TAPU EKSİK' },
@@ -46,7 +46,8 @@ const ALAN = {
   riskli_rapor: { ad: 'Riskli rapor', kisa: 'Riskli', soru: 'Bilgi amaçlı, iş akışını etkilemez',  e: 'Var',     h: 'Yok', ornek: '(ZC BİZ ZD)' },
   rapor_yazildi: { ad: 'Rapor yazıldı', kisa: 'Rapor',  soru: 'Lab sonucundan sonra rapor yazıldı mı?', e: 'Yazıldı', h: 'Yazılmadı', ornek: 'KONTROLDE' },
   imza_cd:       { ad: 'İmza-CD',       kisa: 'İmza-CD', soru: 'İmzalar atıldı, CD hazırlandı mı?',  e: 'Tamam',   h: 'Bekliyor',  ornek: 'MÜH. İMZASI EKSİK' },
-  lab_taramasi:  { ad: 'Lab taraması',  kisa: 'Tarama', soru: 'Lab föyleri tarandı mı?',             e: 'Tarandı', h: 'Taranmadı', ornek: '' },
+  tarama_geldi:  { ad: 'Tarama geldi',  kisa: 'T.Geldi', soru: 'Lab taraması geldi mi?',             e: 'Geldi',   h: 'Gelmedi',   ornek: '' },
+  lab_taramasi:  { ad: 'Tarama yapıldı', kisa: 'T.Yapıldı', soru: 'Lab föyleri tarandı mı?',          e: 'Tarandı', h: 'Taranmadı', ornek: '' },
 };
 const KIMDE = {
   musteri: { ad: 'Müşteriden bekleniyor', renk: 'sari',    ikon: 'musteri' },
@@ -74,7 +75,8 @@ const SUZGECLER = {
   // Tamamlananlar (lab sonucu gelmiş işler) içinde kapanış adımları
   rapor:   { grup: 'tamam', ad: 'Rapor yazılacaklar',       f: (i, d) => d.kimde[0] === 'tamam' && !i.rapor_yazildi },
   imza:    { grup: 'tamam', ad: 'İmza-CD bekleyenler',      f: (i, d) => d.kimde[0] === 'tamam' && !i.imza_cd },
-  tarama:  { grup: 'tamam', ad: 'Lab taraması bekleyenler', f: (i, d) => d.kimde[0] === 'tamam' && !i.lab_taramasi },
+  taramageldi: { grup: 'tamam', ad: 'Lab taraması gelmeyenler', f: (i, d) => d.kimde[0] === 'tamam' && !i.tarama_geldi },
+  tarama:  { grup: 'tamam', ad: 'Lab taraması yapılmayanlar', f: (i, d) => d.kimde[0] === 'tamam' && !i.lab_taramasi },
 };
 
 /* İş akışı:  mimari → zemin değeri (biz) → geo (müşteri) → bina yıkıldı (müşteri bildirir)
@@ -129,7 +131,7 @@ function asama(i, d) {
   if (d.kimde[0] === 'tamam') {
     if (d.bitti) return A(9.9, 'Tamamlandı', 'tamam');
     const ilk = d.bitisEksik[0];
-    return A(9 + BITIS_ALANLARI.indexOf(ilk) / 10, { rapor_yazildi: 'Rapor yazılacak', imza_cd: 'İmza-CD bekliyor', lab_taramasi: 'Lab taraması bekliyor' }[ilk], 'tamam');
+    return A(9 + BITIS_ALANLARI.indexOf(ilk) / 10, { rapor_yazildi: 'Rapor yazılacak', imza_cd: 'İmza-CD bekliyor', tarama_geldi: 'Lab taraması gelmedi', lab_taramasi: 'Lab taraması yapılacak' }[ilk], 'tamam');
   }
   if (!i.zemin_degeri) {
     if (d.zdIcin) return A(1, bekleniyor(d.istenen), 'musteri');
@@ -338,7 +340,7 @@ function hucre(i, alan, d) {
   const beklenen = {          // eksikse kırmızı görünsün mü? (henüz sırası gelmeyen adım gri kalır)
     mimari: true, evrak: true, zemin_degeri: !!i.mimari, geo: i.zemin_degeri, sondaj: i.bina_yikildi === 'evet',
     laba_atildi: i.sondaj, lab: i.laba_atildi, riskli_rapor: false,
-    rapor_yazildi: d.kimde[0] === 'tamam', imza_cd: d.kimde[0] === 'tamam', lab_taramasi: d.kimde[0] === 'tamam',
+    rapor_yazildi: d.kimde[0] === 'tamam', imza_cd: d.kimde[0] === 'tamam', tarama_geldi: d.kimde[0] === 'tamam', lab_taramasi: d.kimde[0] === 'tamam',
   }[alan];
   const bosHucre = !i[alan] && (i.bos_alanlar || []).includes(alan);     // Excel'de boş bırakılmış
   const sinif = i[alan] ? 'var' : beklenen && !bosHucre ? 'yok' : 'bos';
@@ -353,7 +355,7 @@ function notSatirlari(i) {          // Excel'de hücreye yazılan yazılar, ayne
 }
 const SONDAJ_DEGER = { yok: { sondaj: false, sondaja_atildi: false }, atildi: { sondaj: false, sondaja_atildi: true }, yapildi: { sondaj: true, sondaja_atildi: false } };
 const SONDAJ_YAZI = { yok: 'Yapılmadı', atildi: 'Sondaja atıldı', yapildi: 'Yapıldı' };
-const SUTUNLAR = ['mimari', 'evrak', 'zemin_degeri', 'geo', 'bina_yikildi', 'sondaj', 'laba_atildi', 'lab', 'riskli_rapor', 'rapor_yazildi', 'imza_cd', 'lab_taramasi'];
+const SUTUNLAR = ['mimari', 'evrak', 'zemin_degeri', 'geo', 'bina_yikildi', 'sondaj', 'laba_atildi', 'lab', 'riskli_rapor', 'rapor_yazildi', 'imza_cd', 'tarama_geldi', 'lab_taramasi'];
 
 function tabloCiz(isveren) {
   const s = suzgec();
@@ -688,7 +690,7 @@ function adimCubugu(i) {
     ['Evrak ve geo', 'Müşteriden', i.evrak && i.geo],
     ['Sondaj', i.sondaja_atildi && !i.sondaj ? 'Sondaja atıldı' : binaYikik(i) ? 'Bina yıkıldı' : 'Bina yıkılınca', i.sondaj],
     ['Lab', i.laba_atildi ? 'Laboratuvarda' : 'Laba gönderilir', i.laba_atildi && i.lab],
-    ['Rapor ve teslim', BITIS_ALANLARI.filter(a => i[a]).length + '/3 · rapor, imza-CD, tarama', BITIS_ALANLARI.every(a => i[a])],
+    ['Rapor ve teslim', BITIS_ALANLARI.filter(a => i[a]).length + '/4 · rapor, imza-CD, tarama geldi, tarama yapıldı', BITIS_ALANLARI.every(a => i[a])],
   ];
   const etkin = A.findIndex(x => !x[2]);
   return A.map(([ad, alt, tamam], n) => `<div class="adim ${tamam ? 'tamam' : ''} ${n === etkin ? 'etkin' : ''}">
@@ -716,7 +718,7 @@ function ozetCiz() {
   $('#sonraki').innerHTML = m.length
     ? grup('musteri', 'Müşteriye yazılacak', 'musteri') + grup('sondaj', 'Sondajcıdan', 'saat') + grup('lab', 'Laboratuvardan', 'deney') + grup('biz', 'Bizde', 'el')
     : d.bitti ? `<div class="mesaj tamam"><div class="m">İş tamamen bitti: rapor yazıldı, imza-CD ve lab taraması tamam.</div></div>`
-    : `<div class="mesaj-grup"><h4>${ikon('el')}Kapanış</h4>${d.bitisEksik.map(a => `<div class="mesaj biz"><div class="m">${esc(kimlik(f))} ${esc({ rapor_yazildi: 'rapor yazılacak', imza_cd: 'imza-CD bekliyor', lab_taramasi: 'lab taraması yapılacak' }[a])}</div></div>`).join('')}</div>`;
+    : `<div class="mesaj-grup"><h4>${ikon('el')}Kapanış</h4>${d.bitisEksik.map(a => `<div class="mesaj biz"><div class="m">${esc(kimlik(f))} ${esc({ rapor_yazildi: 'rapor yazılacak', imza_cd: 'imza-CD bekliyor', tarama_geldi: 'lab taraması gelmedi', lab_taramasi: 'lab taraması yapılacak' }[a])}</div></div>`).join('')}</div>`;
   ikonlariDoldur($('#sonraki'));
 }
 
@@ -814,7 +816,7 @@ function raporMetinleri(isler, isveren, baslikli) {
   if (biz.length) sonuc.biz = bolumle('biz', biz, !isveren);
   sonuc.labSayi = lab.length; sonuc.bizSayi = biz.length;
   // kapanış: lab sonucu gelmiş işlerde rapor, imza-CD, lab taraması
-  const KAPANIS = { rapor_yazildi: 'Rapor yazılacak', imza_cd: 'İmza-CD bekleyenler', lab_taramasi: 'Lab taraması bekleyenler' };
+  const KAPANIS = { rapor_yazildi: 'Rapor yazılacak', imza_cd: 'İmza-CD bekleyenler', tarama_geldi: 'Lab taraması gelmeyenler', lab_taramasi: 'Lab taraması yapılacaklar' };
   const kapanan = isler.map(i => ({ i, d: isDurumu(i) })).filter(x => x.d.bitisEksik.length);
   sonuc.kapanis = BITIS_ALANLARI.map(a => {
     const s = kapanan.filter(x => x.d.bitisEksik.includes(a))
@@ -856,7 +858,7 @@ async function raporSayfasi(isveren) {
     ${r.lab ? bolumKart(`Laboratuvar <span class="etiket vurgu" style="margin-left:6px">${r.labSayi}</span>`, 'Sondajı yapılmış, laba atılmış ama sonucu gelmemiş işler', r.lab) : ''}
     ${r.labKisa ? bolumKart(`Laboratuvara gönder <span class="etiket vurgu" style="margin-left:6px">${r.labSayi}</span>`, 'Yalnızca ada / parsel, kopyalayıp doğrudan laboratuvara gönderin', r.labKisa) : ''}
     ${r.biz ? bolumKart(`Bizde <span class="etiket turuncu" style="margin-left:6px">${r.bizSayi}</span>`, 'Sizin yapacaklarınız: zemin değeri, sondaj, laba gönderme', r.biz) : ''}
-    ${r.kapanis ? bolumKart(`Kapanış <span class="etiket yesil" style="margin-left:6px">${r.kapanisSayi}</span>`, 'Lab sonucu gelmiş işler: rapor yazılacak, imza-CD, lab taraması', r.kapanis) : ''}`);
+    ${r.kapanis ? bolumKart(`Kapanış <span class="etiket yesil" style="margin-left:6px">${r.kapanisSayi}</span>`, 'Lab sonucu gelmiş işler: rapor yazılacak, imza-CD, lab taraması gelecek / yapılacak', r.kapanis) : ''}`);
   kopyaBagla();
   $('#raporIsveren').onchange = e => { location.hash = '#/isler/rapor/' + encodeURIComponent(e.target.value); };
   $('#baslikli').onchange = e => { depoYaz('raporBaslik', e.target.checked); raporSayfasi(isveren); };

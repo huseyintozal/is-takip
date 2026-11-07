@@ -6,12 +6,12 @@
  *   csvUret(isler)              -> Excel'de açılan CSV (TAKİP sayfasıyla aynı sütunlar)
  *   isGoc(i)                    -> eski kayıtları yeni alanlara tamamlar */
 
-const VERI_DURUM = ['mimari', 'evrak', 'zemin_degeri', 'geo', 'sondaj', 'sondaja_atildi', 'laba_atildi', 'lab', 'riskli_rapor', 'rapor_yazildi', 'imza_cd', 'lab_taramasi'];
+const VERI_DURUM = ['mimari', 'evrak', 'zemin_degeri', 'geo', 'sondaj', 'sondaja_atildi', 'laba_atildi', 'lab', 'riskli_rapor', 'rapor_yazildi', 'imza_cd', 'tarama_geldi', 'lab_taramasi'];
 const VERI_METIN = ['proje_id', 'firma_id', 'isveren', 'mahalle', 'mal_sahibi', 'ada', 'parsel', 'notlar', 'klasor'];   // klasor: bilgisayardaki proje klasörü
 const VERI_ALAN_ADI = {
   mimari: 'Mimari', evrak: 'Evrak', zemin_degeri: 'Zemin değeri', geo: 'Geo', sondaj: 'Sondaj', sondaja_atildi: 'Sondaja atıldı',
   laba_atildi: 'Laba atıldı', lab: 'Lab sonucu', riskli_rapor: 'Riskli rapor', bina_yikildi: 'Bina yıkıldı',
-  rapor_yazildi: 'Rapor yazıldı', imza_cd: 'İmza-CD', lab_taramasi: 'Lab taraması',
+  rapor_yazildi: 'Rapor yazıldı', imza_cd: 'İmza-CD', tarama_geldi: 'Tarama geldi', lab_taramasi: 'Tarama yapıldı',
 };
 
 const simdiIso = () => { const d = new Date(), p = n => String(n).padStart(2, '0');
@@ -38,6 +38,7 @@ function bosIsKaydi() {
 function isGoc(i) {
   i = Object.assign({}, i);
   VERI_METIN.forEach(a => { if (i[a] === undefined || i[a] === null) i[a] = ''; });
+  if (i.tarama_geldi === undefined) i.tarama_geldi = !!i.lab_taramasi;      // eski kayıt: taranmışsa tarama gelmiştir
   VERI_DURUM.forEach(a => { if (i[a] === undefined) i[a] = false; });
   if (!('sondaja_atildi' in i) || i.sondaja_atildi === undefined)
     i.sondaja_atildi = !!(!i.sondaj && (i.alan_notlari || {}).sondaj);
@@ -62,6 +63,7 @@ function isTemizle(gelen, eski, kim = '') {
     if (eski && !!eski[a] !== v) { ekle({ zaman, alan: a, deger: v }); bos.delete(a); }
     i[a] = v;
   });
+  if (gelen.lab_taramasi && !('tarama_geldi' in gelen) && !i.tarama_geldi) i.tarama_geldi = true;   // taranmışsa tarama gelmiştir
   i.bos_alanlar = VERI_DURUM.filter(a => bos.has(a));
   if ('bina_yikildi' in gelen) {
     const v = ['', 'evet', 'hayir'].includes(gelen.bina_yikildi) ? gelen.bina_yikildi : '';
@@ -101,7 +103,7 @@ const BASLIK_ESLES = {
   'MİMARİ': 'mimari', 'EVRAK': 'evrak', 'GEO': 'geo', 'LAB': 'lab', 'ZEMİN DEĞERİ VERİLDİ': 'zemin_degeri',
   'ZEMİN DEĞERİ': 'zemin_degeri', 'LABA ATILDI': 'laba_atildi', 'RİSKLİ RAPOR': 'riskli_rapor', 'SONDAJ': 'sondaj',
   'BİNA YIKILDI': 'bina_yikildi', 'NOTLAR': 'notlar', 'NOT': 'notlar',
-  'RAPOR YAZILDI': 'rapor_yazildi', 'K RAPOR YAZILDI': 'rapor_yazildi', 'İMZA-CD': 'imza_cd', 'İMZA CD': 'imza_cd', 'LAB TARAMASI': 'lab_taramasi',
+  'RAPOR YAZILDI': 'rapor_yazildi', 'K RAPOR YAZILDI': 'rapor_yazildi', 'İMZA-CD': 'imza_cd', 'İMZA CD': 'imza_cd', 'TARAMA GELDİ': 'tarama_geldi', 'LAB TARAMASI': 'lab_taramasi', 'TARAMA YAPILDI': 'lab_taramasi',
 };
 function excelSatirlari(satirlar, sayfa = 'TAKİP') {
   if (!satirlar.length) return [];
@@ -167,7 +169,7 @@ function excelPlani(gelen, mevcut, guncelle, kim) {
 function csvUret(isler) {
   const h = v => { const s = String(v ?? ''); return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   const satirlar = [['İŞVEREN', 'MAHALLE', 'MAL SAHİBİ', 'ADA', 'PARSEL', 'MİMARİ', 'EVRAK', 'GEO', 'LAB',
-    'ZEMİN DEĞERİ VERİLDİ', 'LABA ATILDI', 'RİSKLİ RAPOR', 'SONDAJ', 'BİNA YIKILDI', 'NOTLAR', 'RAPOR YAZILDI', 'İMZA-CD', 'LAB TARAMASI']];
+    'ZEMİN DEĞERİ VERİLDİ', 'LABA ATILDI', 'RİSKLİ RAPOR', 'SONDAJ', 'BİNA YIKILDI', 'NOTLAR', 'RAPOR YAZILDI', 'İMZA-CD', 'TARAMA GELDİ', 'LAB TARAMASI']];
   isler.forEach(i => {
     const n = i.alan_notlari || {}, bos = i.bos_alanlar || [];
     const ev = (a, e = '+', hh = 'YOK') => n[a] || (bos.includes(a) ? '' : (i[a] ? e : hh));
@@ -175,7 +177,7 @@ function csvUret(isler) {
       ev('zemin_degeri', '+', 'VERİLMEDİ'), ev('laba_atildi', '+', 'ATILMADI'), ev('riskli_rapor'),
       n.sondaj || (bos.includes('sondaj') ? '' : i.sondaj ? 'YAPILDI' : i.sondaja_atildi ? 'SONDAJA ATILDI' : 'YAPILMADI'),
       n.bina_yikildi || ({ evet: 'EVET', hayir: 'HAYIR' }[i.bina_yikildi] || ''), i.notlar || '',
-      ev('rapor_yazildi'), ev('imza_cd'), ev('lab_taramasi')]);
+      ev('rapor_yazildi'), ev('imza_cd'), ev('tarama_geldi'), ev('lab_taramasi')]);
   });
   return '﻿' + satirlar.map(r => r.map(h).join(';')).join('\r\n') + '\r\n';
 }
