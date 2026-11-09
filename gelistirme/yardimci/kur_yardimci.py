@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """İş Takibi Dosya Yardımcısı kurulumu (KUR.bat çalıştırır). Yönetici izni gerekmez.
  - %LOCALAPPDATA%\\Programs\\IsTakibiYardimci klasörüne kopyalar
- - Windows açılınca kendiliğinden başlasın diye Başlangıç klasörüne kısayol koyar
+ - Windows açılınca kendiliğinden başlasın diye kullanıcının "Run" kaydına ekler
+   (PowerShell kullanmaz: antivirüsler gizli PowerShell komutlarını tehdit sanıp engelliyor)
  - hemen başlatır"""
-import base64
 import os
 import shutil
 import subprocess
@@ -13,10 +13,8 @@ KAYNAK = os.path.dirname(os.path.abspath(__file__))
 HEDEF = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'Programs', 'IsTakibiYardimci')
 
 
-def powershell(betik):
-    kod = base64.b64encode(betik.encode('utf-16-le')).decode()
-    return subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', kod],
-                          capture_output=True, text=True)
+RUN_ANAHTARI = r'Software\Microsoft\Windows\CurrentVersion\Run'
+ESKI_KISAYOL = os.path.join(os.environ.get('APPDATA') or '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'İş Takibi Dosya Yardımcısı.lnk')
 
 
 def main():
@@ -35,24 +33,19 @@ def main():
             time.sleep(1)
         except Exception:
             break
-    powershell(r"""Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*yardimci.pyw*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }""")
     time.sleep(1)
     os.makedirs(HEDEF, exist_ok=True)
     for d in ('yardimci.pyw', 'kaldir_yardimci.py'):
         shutil.copy2(os.path.join(KAYNAK, d), os.path.join(HEDEF, d))
     hedef = os.path.join(HEDEF, 'yardimci.pyw')
-    q = lambda s: s.replace("'", "''")
-    r = powershell(r'''
-$k = New-Object -ComObject WScript.Shell
-$s = $k.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Startup')) 'İş Takibi Dosya Yardımcısı.lnk'))
-$s.TargetPath = '%s'
-$s.Arguments = '"%s"'
-$s.WorkingDirectory = '%s'
-$s.Description = 'İş Takibi: proje klasörlerine erişim'
-$s.Save()
-''' % (q(pythonw), q(hedef), q(HEDEF)))
-    if r.returncode != 0:
-        print('  ! Başlangıç kısayolu açılamadı:', r.stderr.strip()[:300])
+    try:                                   # Windows açılınca başlasın
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_ANAHTARI, 0, winreg.KEY_SET_VALUE) as k:
+            winreg.SetValueEx(k, 'IsTakibiDosyaYardimcisi', 0, winreg.REG_SZ, '"%s" "%s"' % (pythonw, hedef))
+        if os.path.exists(ESKI_KISAYOL):   # eski sürümün başlangıç kısayolu (iki kez başlamasın)
+            os.remove(ESKI_KISAYOL)
+    except Exception as e:
+        print('  ! Otomatik başlatma ayarlanamadı:', e)
     subprocess.Popen([pythonw, hedef], cwd=HEDEF)
     surum = '?'
     for _ in range(10):
