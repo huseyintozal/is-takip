@@ -217,9 +217,14 @@ async function ozelFiyatlariKaldir(anahtar) {
   bildir(`${l.length} iş ${tl(c.varsayilan_ucret)} üzerinden hesaplanıyor`);
 }
 function hareketPenceresi({ cari, tur, isler = [], isId = '' }) {
+  // tahsilat birden çok işe dağıtılabilir (ör. 10 işe karşılık tek çek): her iş için ayrı satır, artanı genel
+  const coklu = tur === 'tahsilat' && isler.length > 0;
+  const kalanOf = i => Math.max(0, (isMali(i).bedel.tutar || 0) - isAlinan(i.id));
+  const secilebilir = coklu ? isler.filter(i => i.id === isId || kalanOf(i) > 0.004)
+    .sort((a, b) => (a.id === isId ? -1 : b.id === isId ? 1 : 0) || String(a.olusturma || '').localeCompare(String(b.olusturma || ''))) : [];
   return new Promise(coz => {
     const p = $('#perde');
-    p.innerHTML = `<div class="pencere"><h3>${tur === 'tahsilat' ? 'Ödeme al' : 'Ödeme yap'} — ${esc(cari.ad)}</h3>
+    p.innerHTML = `<div class="pencere${coklu ? ' orta' : ''}"><h3>${tur === 'tahsilat' ? 'Ödeme al' : 'Ödeme yap'} — ${esc(cari.ad)}</h3>
       <form id="hForm" class="yigin">
         <div class="form-izgara">
           <div class="alan"><label>Tutar (₺)</label><input class="girdi" id="hTutar" inputmode="decimal" placeholder="örn. 25.000" required></div>
@@ -229,7 +234,14 @@ function hareketPenceresi({ cari, tur, isler = [], isId = '' }) {
           <div class="alan" id="hCekAlan" style="display:none"><label>Çekin tarihi (vade)</label><input class="girdi" id="hCek" type="date"></div>
           <div class="alan" id="hDekontAlan"><label>Dekont (isteğe bağlı)</label><input class="girdi" id="hDekont" type="file" accept="image/*,application/pdf"></div>`}
           <div class="alan genis"><label>Açıklama</label><input class="girdi" id="hAciklama" placeholder="örn. banka, çek no"></div>
-          ${isler.length ? `<div class="alan genis"><label>Hangi iş için? (isteğe bağlı)</label><select class="girdi" id="hIs"><option value="">— Genel ödeme (işe bağlı değil) —</option>
+          ${coklu ? `<div class="alan genis"><label>Hangi işler için? (isteğe bağlı, birden çok seçilebilir)</label>
+            ${secilebilir.length ? `<div class="is-dagit">${secilebilir.map(i => `<label class="is-dagit-satir">
+              <input type="checkbox" data-dis="${esc(i.id)}" ${i.id === isId ? 'checked' : ''}>
+              <span class="ad">${esc(kimlik(i))}<span class="soluk kucuk-yazi"> · kalan ${tl(kalanOf(i))}</span></span>
+              <input class="girdi" data-dtutar="${esc(i.id)}" inputmode="decimal" placeholder="tutar" ${i.id === isId ? '' : 'disabled'}></label>`).join('')}</div>
+              <div class="kucuk-yazi" id="hDagitOzet" style="margin-top:6px"></div>`
+            : '<div class="kucuk-yazi soluk">Bu firmanın ödenmemiş işi yok; ödeme genel olarak kaydedilir.</div>'}</div>`
+          : isler.length ? `<div class="alan genis"><label>Hangi iş için? (isteğe bağlı)</label><select class="girdi" id="hIs"><option value="">— Genel ödeme (işe bağlı değil) —</option>
             ${isler.map(i => `<option value="${esc(i.id)}" ${i.id === isId ? 'selected' : ''}>${esc(kimlik(i))}${tur === 'tahsilat' ? ' · ' + tl(isMali(i).bedel.tutar) : ''}</option>`).join('')}</select></div>` : ''}
         </div>
         <div class="dugmeler"><button type="button" class="dugme hayalet" data-c="0">Vazgeç</button><button class="dugme ana" type="submit">${ikon('kaydet')}Kaydet</button></div></form></div>`;
@@ -241,10 +253,36 @@ function hareketPenceresi({ cari, tur, isler = [], isId = '' }) {
       const yGoster = () => { const v = $('#hYontem').value; $('#hCekAlan').style.display = v === 'cek' ? '' : 'none'; $('#hDekontAlan').style.display = v === 'havale' ? '' : 'none'; };
       $('#hYontem').onchange = yGoster; yGoster();
     }
+    // çoklu iş: işaretlenen işe kalanı kadar (tutardan artan varsa) yazılır; özet artanı gösterir
+    const dagitim = () => $$('[data-dis]', p).filter(c => c.checked).map(c => ({ id: c.dataset.dis, tutar: tutarOku($(`[data-dtutar="${c.dataset.dis}"]`, p).value) || 0 }));
+    const ozetYaz = () => {
+      const o = $('#hDagitOzet', p); if (!o) return;
+      const t = tutarOku($('#hTutar').value) || 0, d = dagitim(), top = d.reduce((a, x) => a + x.tutar, 0);
+      o.innerHTML = !d.length ? '<span class="soluk">İş seçilmezse ödeme firmaya genel olarak yazılır.</span>'
+        : `<b>${d.length}</b> işe ${tl(top)}` + (top > t + 0.004 ? ` · <span style="color:var(--kirmizi)">tutardan ${tl(top - t)} fazla</span>` : t - top > 0.004 ? ` · genel (işe bağlı değil): ${tl(t - top)}` : ' · tamamı işlere dağıtıldı');
+    };
+    const bosta = () => (tutarOku($('#hTutar').value) || 0) - dagitim().reduce((a, x) => a + x.tutar, 0);
+    $$('[data-dis]', p).forEach(c => c.onchange = () => {
+      const g = $(`[data-dtutar="${c.dataset.dis}"]`, p); g.disabled = !c.checked;
+      if (c.checked && !tutarOku(g.value)) { const i = secilebilir.find(x => x.id === c.dataset.dis); const v = Math.min(kalanOf(i), Math.max(0, bosta())); g.value = v > 0 ? String(Math.round(v * 100) / 100) : ''; }
+      if (!c.checked) g.value = '';
+      ozetYaz();
+    });
+    $$('[data-dtutar]', p).forEach(g => g.oninput = ozetYaz);
+    $('#hTutar').addEventListener('input', () => {
+      // tek iş seçiliyse tutarı izlesin (işin kalanını aşmadan)
+      const d = $$('[data-dis]', p).filter(c => c.checked);
+      if (d.length === 1) { const i = secilebilir.find(x => x.id === d[0].dataset.dis); const t = tutarOku($('#hTutar').value) || 0; $(`[data-dtutar="${i.id}"]`, p).value = t ? String(Math.min(t, kalanOf(i) || t)) : ''; }
+      ozetYaz();
+    });
+    ozetYaz();
     $('#hForm').onsubmit = async e => {
       e.preventDefault();
       const tutar = tutarOku($('#hTutar').value);
       if (!tutar || tutar <= 0) return bildir('Geçerli bir tutar yazın', 'hata');
+      const parca = coklu ? dagitim().filter(x => x.tutar > 0) : [];
+      const dagilan = parca.reduce((a, x) => a + x.tutar, 0);
+      if (dagilan > tutar + 0.004) return bildir(`İşlere yazılan toplam (${tl(dagilan)}) tutardan fazla`, 'hata');
       const satir = { cari_id: cari.id, tur, tutar, tarih: $('#hTarih').value, aciklama: $('#hAciklama').value.trim(), is_id: ($('#hIs') || {}).value || null, ekleyen: BULUT.eposta };
       if ($('#hYontem')) {
         satir.yontem = $('#hYontem').value;
@@ -258,11 +296,16 @@ function hareketPenceresi({ cari, tur, isler = [], isId = '' }) {
           satir.dekont = yol;
         }
       }
-      const { data, error } = await BULUT.sb.from('hareketler').insert(satir).select().single();
+      // birden çok işe dağıtıldıysa: iş başına bir satır + artan genel satır (hepsinde aynı yöntem/çek/dekont)
+      const parcalar = [...parca, ...(parca.length && tutar - dagilan > 0.004 ? [{ id: null, tutar: tutar - dagilan }] : [])];
+      const satirlar = !parcalar.length ? [satir]
+        : parcalar.map(x => Object.assign({}, satir, { tutar: Math.round(x.tutar * 100) / 100, is_id: x.id,
+            aciklama: parcalar.length > 1 ? [satir.aciklama, `${tl(tutar)} ödemenin parçası`].filter(Boolean).join(' · ') : satir.aciklama }));
+      const { data, error } = await BULUT.sb.from('hareketler').insert(satirlar).select();
       if (error) return hataGoster(sbHata(error));
-      MALI.hareketler.set(data.id, data);
-      bildir(`${tl(tutar)} ${tur === 'tahsilat' ? 'tahsilat' : 'ödeme'} kaydedildi`);
-      kapat(data);
+      (data || []).forEach(h => MALI.hareketler.set(h.id, h));
+      bildir(`${tl(tutar)} ${tur === 'tahsilat' ? 'tahsilat' : 'ödeme'} kaydedildi${parca.length > 1 ? ` (${parca.length} işe dağıtıldı)` : ''}`);
+      kapat((data || [])[0] || true);
     };
     $('#hTutar').focus();
   });
