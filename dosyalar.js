@@ -393,20 +393,22 @@ async function dosyaAc(id) {
   if (error) { if (pencere) pencere.close(); return hataGoster(sbHata(error)); }
   if (pencere) pencere.location = data.signedUrl; else location.href = data.signedUrl;
 }
-async function dosyaBulutaYukle(id) {
+async function dosyaBulutaYukle(id, sessiz = false) {
   const d = DOSYA.satirlar.get(id); const i = d && BULUT.isler.get(d.is_id);
-  if (!d || !i || d.bulut_yolu) return;
+  if (!d || !i || d.bulut_yolu) return true;
   await yardimciDenetle();
-  if (!yardimciHazir() || !i.klasor) return bildir('Dosya bu bilgisayarda değil', 'hata');
+  const klasor = yardimciHazir() ? await klasorDogrula(i) : '';
+  if (!klasor) { if (!sessiz) bildir('Dosya bu bilgisayarda değil', 'hata'); return false; }
   try {
-    const y = yerAyir(i.klasor, d.ad);
+    const y = yerAyir(klasor, d.ad);
     const r = await yardimci(`/oku?klasor=${encodeURIComponent(y.klasor)}&ad=${encodeURIComponent(y.ad)}`, { ham: true, sure: 120000 });
     const b = await bulutaKoy(i.id, await r.blob(), d.ad);
     if (!b.yol) throw new Error('Buluta yüklenmedi: ' + b.hata);
     const { data, error } = await BULUT.sb.from('dosyalar').update({ bulut_yolu: b.yol }).eq('id', id).select().single();
     if (error) throw sbHata(error);
-    DOSYA.satirlar.set(id, data); dosyaKartiCiz(i.id); bildir('Buluta yüklendi');
-  } catch (e) { hataGoster(e); }
+    DOSYA.satirlar.set(id, data); dosyaKartiCiz(i.id); if (!sessiz) bildir('Buluta yüklendi');
+    return true;
+  } catch (e) { if (!sessiz) hataGoster(e); return false; }
 }
 async function dosyaSil(id) {
   const d = DOSYA.satirlar.get(id); if (!d) return;
@@ -780,12 +782,17 @@ async function eksikleriBul() {
   let var_ = [];
   try { var_ = (await yardimci('/varlar', { json: { dosyalar: sorgu }, sure: 60000 })).var; } catch (e) { var_ = adaylar.map(() => true); }
   const eksik = adaylar.filter((d, n) => !sorgu[n].klasor || !var_[n]);
-  const yalnizPc = [...DOSYA.satirlar.values()].filter(d => !d.bulut_yolu && d.pc === pc);
-  return { eksik, yalnizPc };
+  const pcdeki = [...DOSYA.satirlar.values()].filter(d => !d.bulut_yolu && d.pc === pc);
+  const pcSorgu = pcdeki.map(d => { const k = (BULUT.isler.get(d.is_id) || {}).klasor || ''; return k ? yerAyir(k, d.ad) : { klasor: '', ad: d.ad }; });
+  let pcVar = [];
+  try { pcVar = (await yardimci('/varlar', { json: { dosyalar: pcSorgu }, sure: 60000 })).var; } catch (e) { pcVar = pcdeki.map(() => true); }
+  const yalnizPc = pcdeki.filter((d, n) => pcSorgu[n].klasor && pcVar[n]);
+  const kayip = pcdeki.filter((d, n) => !pcSorgu[n].klasor || !pcVar[n]);
+  return { eksik, yalnizPc, kayip };
 }
 async function esitlemeCiz() {
   const kutu = $('#esitle'); if (!kutu) return;
-  const { eksik, yalnizPc } = await eksikleriBul();
+  const { eksik, yalnizPc, kayip } = await eksikleriBul();
   DOSYA.eksikSayi = eksik.length; kenarYaz();
   const top = l => boyutYaz(l.reduce((t, d) => t + (d.boyut || 0), 0));
   kutu.innerHTML = `
@@ -797,13 +804,41 @@ async function esitlemeCiz() {
       <div style="flex:1"><b>${yalnizPc.length ? `Yalnızca bu bilgisayarda ${yalnizPc.length} dosya var (${top(yalnizPc)})` : 'Bu bilgisayardaki dosyaların hepsi bulutta'}</b>
         <div class="soluk kucuk-yazi">Buluta yüklenmeyen dosyalar diğer cihazlarda listede görünür ama açılamaz.</div></div>
       ${yalnizPc.length && !saltOkunur() ? `<button class="dugme" id="yukleHepsi">${ikon('bulut')}Buluta yükle</button>` : ''}</div>
+    ${kayip.length ? `<div class="sistem-satir" style="padding:0"><div class="durum-ikon opsiyon">${ikon('bilgi')}</div>
+      <div style="flex:1"><b>Listede ${kayip.length} dosya var ama klasörde bulunamadı (${top(kayip)})</b>
+        <div class="soluk kucuk-yazi">Bu bilgisayara eklenmiş ama sonradan silinmiş, adı değişmiş ya da başka yere taşınmış. Ne buluta yüklenebilir ne açılabilir.
+          "Klasörleri yeniden ara" taşınan klasörleri bulur; bulunamayanları listeden kaldırabilirsiniz (bilgisayardaki hiçbir şey silinmez).</div>
+        <details class="kucuk-yazi" style="margin-top:4px"><summary>Dosyaları göster</summary>${kayip.map(d => `<div>${esc(kimlik(BULUT.isler.get(d.is_id) || {}))} — ${esc(d.ad)}</div>`).join('')}</details></div>
+      ${!saltOkunur() ? `<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="dugme" id="kayipAra">${ikon('ara')}Klasörleri yeniden ara</button>
+        <button class="dugme hayalet tehlike" id="kayipSil">${ikon('sil')}Listeden kaldır</button></div>` : ''}</div>` : ''}
     <div id="esitleDurum" class="soluk kucuk-yazi"></div>`;
   ikonlariDoldur(kutu);
   if ($('#indirHepsi')) $('#indirHepsi').onclick = () => bilgisayaraIndir(eksik);
   if ($('#yukleHepsi')) $('#yukleHepsi').onclick = async () => {
-    const d = $('#esitleDurum');
-    for (const [n, x] of yalnizPc.entries()) { d.textContent = `${x.ad} yükleniyor (${n + 1}/${yalnizPc.length})…`; await dosyaBulutaYukle(x.id); }
+    const d = $('#esitleDurum'); $('#yukleHepsi').disabled = true;
+    let n = 0, ok = 0; const olmayan = [];
+    await havuz(yalnizPc, 3, async x => {
+      if (await dosyaBulutaYukle(x.id, true)) ok++; else olmayan.push(yalinAd(x.ad));
+      d.textContent = `Buluta yükleniyor: ${++n}/${yalnizPc.length}…`;
+    });
+    d.textContent = '';
+    bildir(`${ok} dosya buluta yüklendi` + (olmayan.length ? ` · ${olmayan.length} dosya yüklenemedi: ${olmayan.slice(0, 5).join(', ')}${olmayan.length > 5 ? '…' : ''}` : ''), olmayan.length ? 'hata' : undefined);
+    esitlemeCiz();
+  };
+  if ($('#kayipAra')) $('#kayipAra').onclick = async () => {
+    const d = $('#esitleDurum'); const isler = [...new Set(kayip.map(x => x.is_id))].map(id => BULUT.isler.get(id)).filter(Boolean);
+    for (const [n, i] of isler.entries()) { d.textContent = `Klasörler aranıyor (${n + 1}/${isler.length})…`; try { await klasorDogrula(i, true); } catch (e) { /* bulunamadı */ } }
     d.textContent = ''; esitlemeCiz();
+  };
+  if ($('#kayipSil')) $('#kayipSil').onclick = async () => {
+    if (!await onayla('Listeden kaldırılsın mı?', `Klasörde bulunamayan <b>${kayip.length}</b> dosya listeden kaldırılacak. Bilgisayardaki ve buluttaki hiçbir dosya silinmez.`, 'Kaldır', true)) return;
+    for (let k = 0; k < kayip.length; k += 100) {
+      const ids = kayip.slice(k, k + 100).map(x => x.id);
+      const { error } = await BULUT.sb.from('dosyalar').delete().in('id', ids);
+      if (error) return hataGoster(sbHata(error));
+      ids.forEach(id => DOSYA.satirlar.delete(id));
+    }
+    bildir(`${kayip.length} dosya listeden kaldırıldı`); esitlemeCiz();
   };
 }
 async function bilgisayaraIndir(eksik) {

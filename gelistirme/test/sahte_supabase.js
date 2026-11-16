@@ -15,6 +15,7 @@
     const api = {
       order() { return api; }, range(a, b) { q.range = [a, b]; return api; },
       eq(k, v) { q.filtre.push(r => r[k] === v); return api; },
+      in(k, l) { q.filtre.push(r => l.includes(r[k])); return api; },
       ilike(k, v) { q.filtre.push(r => String(r[k]).toLowerCase() === String(v).toLowerCase()); return api; },
       maybeSingle() { q.tek = true; return api; },
       single() { q.tek = true; return api; },
