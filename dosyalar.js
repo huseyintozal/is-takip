@@ -22,7 +22,7 @@ const KATEGORI_AD = Object.fromEntries(KATEGORI.map(k => [k[0], k[1]]));
 const YARDIMCI = 'http://127.0.0.1:8767';
 const BULUT_SINIR = 1024 * 1024 * 1024;        // ücretsiz plan: 1 GB
 const DOSYA_SINIR = 50 * 1024 * 1024;           // ücretsiz plan: dosya başına 50 MB
-const DOSYA = { satirlar: new Map(), yardimci: null, yardimciZaman: 0, kanal: null, eksikSayi: 0, kullanim: null, dogrulandi: new Map(), kayip: new Set(), isaretlendi: false };
+const DOSYA = { satirlar: new Map(), yardimci: null, yardimciZaman: 0, kanal: null, eksikSayi: 0, kullanim: null, dogrulandi: new Map(), kayip: new Set(), isaretlendi: false, kuyruk: new Map() };
 
 const boyutYaz = b => !b ? '0 KB' : b >= 1024 ** 3 ? (b / 1024 ** 3).toFixed(2) + ' GB' : b >= 1024 ** 2 ? (b / 1024 ** 2).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
 const uzantiAl = ad => ((ad.match(/\.([A-Za-z0-9]{1,8})$/) || [])[1] || '').toLowerCase();
@@ -249,6 +249,36 @@ function birakilanDosyalar(dt) {
   }
   return (async () => { const cikti = []; for (const g of girdiler) await topla(g, cikti, ''); return cikti; })();
 }
+/* Bilgisayara yazılmış dosyaları arka planda buluta yükler (sayfa değişse de sürer; sekme kapanırsa
+ * kalanlar "yalnızca bilgisayarda" kalır, Dosyalar sayfasındaki "Buluta yükle" ile tamamlanır) */
+async function bulutKuyrugu() {
+  if (DOSYA.kuyrukCalisiyor) return;
+  DOSYA.kuyrukCalisiyor = true;
+  const hatalar = [];
+  try {
+    while (DOSYA.kuyruk.size) {
+      const parti = [...DOSYA.kuyruk.values()];
+      const sayac = ilerlemeSayaci(parti.map(x => x.blob), m => { const k = $('#dosyaDurum'); if (k) k.textContent = 'Buluta: ' + m; });
+      await havuz(parti, 3, async x => {
+        const b = await bulutaKoy(x.isId, x.blob, x.ad, n => sayac.ilerle(x.blob, n));
+        sayac.bitti(x.blob);
+        if (b.yol) {
+          const { data, error } = await BULUT.sb.from('dosyalar').update({ bulut_yolu: b.yol }).eq('id', x.id).select().single();
+          if (error) hatalar.push(`${yalinAd(x.ad)}: ${sbHata(error).message}`); else DOSYA.satirlar.set(x.id, data);
+        } else hatalar.push(`${yalinAd(x.ad)}: ${b.hata}`);
+        DOSYA.kuyruk.delete(x.id);
+        dosyaKartiCiz(x.isId);
+      });
+    }
+  } finally {
+    DOSYA.kuyrukCalisiyor = false;
+    if ($('#dosyaDurum')) $('#dosyaDurum').textContent = '';
+    if ($('#dosyaKarti')) dosyaKartiCiz($('#dosyaKarti').dataset.is);
+  }
+  if (hatalar.length) bildir('Buluta yüklenemedi (yalnızca bilgisayarda kaldı): ' + hatalar.join(' · '), 'hata');
+  else bildir('Dosyalar buluta yüklendi');
+}
+window.addEventListener('beforeunload', e => { if (DOSYA.kuyruk.size) { e.preventDefault(); e.returnValue = ''; } });
 /* liste'yi aynı anda en çok n iş yürüterek işler (yüklemeler sırayla değil birkaç dosya birden gider) */
 async function havuz(liste, n, f) {
   let sira = 0;
@@ -278,33 +308,36 @@ async function dosyaEkle(isId, kategori, dosyalar) {
   if (!pcde && !bulut) return bildir('Bu cihazda dosya kaydedilecek yer yok: Dosya Yardımcısı yok ve buluta yükleme kapalı', 'hata');
   let klasor = '';
   if (pcde) { try { klasor = await isKlasoru(i); } catch (e) { return hataGoster(e); } }
-  let tamam = 0; const uyarilar = [];
-  const sayac = ilerlemeSayaci(dosyalar, m => { const k = $('#dosyaDurum'); if (k) k.textContent = m; });
+  let tamam = 0; const uyarilar = []; const arkaPlan = [];
+  // bilgisayar varsa önce oraya yazılır (hızlı), buluta yükleme arka planda sürer; yoksa beklenir
+  const sayac = pcde ? null : ilerlemeSayaci(dosyalar, m => { const k = $('#dosyaDurum'); if (k) k.textContent = m; });
+  if (pcde && $('#dosyaDurum')) $('#dosyaDurum').textContent = `${dosyalar.length} dosya klasöre yazılıyor…`;
   await havuz(dosyalar, 3, async d => {
     const katKlasor = (KATEGORI.find(k => k[0] === kategori) || [])[3];
     let alt = d.altKlasor || '';
     if (katKlasor && katla(alt.split('/')[0]) !== katla(katKlasor)) alt = katKlasor + (alt ? '/' + alt : '');
     let ad = (alt ? alt + '/' : '') + d.name, pcOk = false, yol = null;
-    // bilgisayara yazma ile buluta yükleme aynı anda
-    const pcIs = pcde ? (async () => {
-      try { const y = yerAyir(klasor, ad); const r = await yardimci(`/yaz?klasor=${encodeURIComponent(y.klasor)}&ad=${encodeURIComponent(y.ad)}`, { govde: d, sure: 120000 }); pcOk = true; return (alt ? alt + '/' : '') + r.ad; }
+    if (pcde) {
+      try { const y = yerAyir(klasor, ad); const r = await yardimci(`/yaz?klasor=${encodeURIComponent(y.klasor)}&ad=${encodeURIComponent(y.ad)}`, { govde: d, sure: 120000 }); pcOk = true; ad = (alt ? alt + '/' : '') + r.ad; }
       catch (e) { uyarilar.push(`${d.name}: bilgisayara yazılamadı (${e.message})`); }
-    })() : null;
-    const b = bulut ? await bulutaKoy(isId, d, ad, n => sayac.ilerle(d, n)) : null;
-    const pcAd = await pcIs; if (pcAd) ad = pcAd;
-    sayac.bitti(d);
+    }
+    const b = bulut && !pcOk ? await bulutaKoy(isId, d, ad, sayac ? n => sayac.ilerle(d, n) : null) : null;
+    if (sayac) sayac.bitti(d);
     if (b) { if (b.yol) yol = b.yol; else uyarilar.push(`${d.name}: buluta yüklenmedi (${b.hata})${pcOk ? ', yalnızca bilgisayarda' : ''}`); }
     if (!pcOk && !yol) return;
     const satir = { is_id: isId, kategori, ad, boyut: d.size, tur: d.type || '', bulut_yolu: yol, pc: pcOk ? buCihaz() : '', ekleyen: BULUT.eposta };
     const { data, error } = await BULUT.sb.from('dosyalar').insert(satir).select().single();
     if (error) { uyarilar.push(`${d.name}: listeye eklenemedi (${sbHata(error).message})`); return; }
     DOSYA.satirlar.set(data.id, data); tamam++;
+    if (bulut && pcOk) arkaPlan.push({ id: data.id, isId, blob: d, ad });
   });
   if ($('#dosyaDurum')) $('#dosyaDurum').textContent = '';
+  arkaPlan.forEach(x => DOSYA.kuyruk.set(x.id, x));
+  if (arkaPlan.length) bulutKuyrugu();
   if (pcde && klasor) yardimci('/isaretle', { json: { liste: [{ klasor, is_id: isId }] } }).then(r => gorulduYaz(r.var || [])).catch(() => {});
   dosyaKartiCiz(isId);
   if (uyarilar.length) bildir(uyarilar.join(' · '), 'hata');
-  if (tamam) bildir(`${tamam} dosya eklendi${pcde ? ' (bilgisayara ve ' + (bulut ? 'buluta)' : 'yalnızca bilgisayara)') : ' (buluta)'}`);
+  if (tamam) bildir(`${tamam} dosya eklendi${pcde ? (bulut ? ' (bilgisayara; buluta arka planda yükleniyor, beklemeden devam edebilirsiniz)' : ' (yalnızca bilgisayara)') : ' (buluta)'}`);
   // dosya geldiyse ilgili adım işaretlensin mi?
   const alan = (KATEGORI.find(k => k[0] === kategori) || [])[2];
   const guncel = BULUT.isler.get(isId);
@@ -411,7 +444,8 @@ function dosyaKartiCiz(isId) {
   const rozet = d => [
     d.bulut_yolu ? `<span class="etiket vurgu" title="Bulutta, her cihazdan açılır">${ikon('bulut')}Bulut</span>` : '',
     d.pc ? `<span class="etiket ${d.pc === buCihaz() ? 'yesil' : ''}" title="Bilgisayardaki proje klasöründe">${ikon('pc')}${d.pc === buCihaz() ? 'Bu bilgisayar' : esc(d.pc)}</span>` : '',
-    !d.bulut_yolu ? '<span class="etiket sari" title="Diğer cihazlardan açılamaz">yalnızca bilgisayarda</span>' : '',
+    !d.bulut_yolu && DOSYA.kuyruk.has(d.id) ? `<span class="etiket" title="Arka planda buluta yükleniyor">${ikon('bulut')}buluta gidiyor…</span>` : '',
+    !d.bulut_yolu && !DOSYA.kuyruk.has(d.id) ? '<span class="etiket sari" title="Diğer cihazlardan açılamaz">yalnızca bilgisayarda</span>' : '',
   ].join('');
   const satir = d => `<li class="dosya-satir" data-dosya="${esc(d.id)}" draggable="${yaz}">
       <div class="dosya-ikon ${esc(uzantiAl(d.ad))}">${esc(uzantiAl(d.ad).toUpperCase().slice(0, 4) || 'DOS')}</div>
