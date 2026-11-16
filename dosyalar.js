@@ -20,8 +20,8 @@ const KATEGORI = [
 ];
 const KATEGORI_AD = Object.fromEntries(KATEGORI.map(k => [k[0], k[1]]));
 const YARDIMCI = 'http://127.0.0.1:8767';
-const BULUT_SINIR = 1024 * 1024 * 1024;        // ücretsiz plan: 1 GB
-const DOSYA_SINIR = 50 * 1024 * 1024;           // ücretsiz plan: dosya başına 50 MB
+const BULUT_SINIR = 100 * 1024 ** 3;            // Pro plan: 100 GB
+const DOSYA_SINIR = 500 * 1024 * 1024;          // Pro plan (Supabase › Storage › Settings'teki sınır 500 MB yapılmalı)
 const DOSYA = { satirlar: new Map(), yardimci: null, yardimciZaman: 0, kanal: null, eksikSayi: 0, kullanim: null, dogrulandi: new Map(), kayip: new Set(), isaretlendi: false, kuyruk: new Map() };
 
 const boyutYaz = b => !b ? '0 KB' : b >= 1024 ** 3 ? (b / 1024 ** 3).toFixed(2) + ' GB' : b >= 1024 ** 2 ? (b / 1024 ** 2).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
