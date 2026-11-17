@@ -807,10 +807,15 @@ function raporMetinleri(isler, isveren, baslikli) {
   const lab = duz('lab');
   // laboratuvara doğrudan gönderilecek kısa liste: yalnızca "694 ADA 8 PARSEL"
   const sayi = v => parseInt(v) || 0;
-  sonuc.labKisa = lab.map(x => x.i)
+  const adaParselListe = l => l
     .sort((a, b) => sayi(a.ada) - sayi(b.ada) || sayi(a.parsel) - sayi(b.parsel))
     .map(i => [i.ada && i.ada !== '-' ? `${i.ada} ADA` : '', i.parsel ? `${i.parsel} PARSEL` : ''].filter(Boolean).join(' '))
     .join('\n');
+  sonuc.labKisa = adaParselListe(lab.map(x => x.i));
+  // lab sonucu gelmiş ama taraması gelmemiş işler: laboratuvardan tarama istenecek (yalnızca ada / parsel)
+  const tarama = isler.filter(i => i.lab && !i.tarama_geldi);
+  sonuc.taramaKisa = adaParselListe(tarama);
+  sonuc.taramaSayi = tarama.length;
   if (lab.length) sonuc.lab = (baslikli ? `Lab sonucu beklenenler – ${bugun()}\n\n` : '') + bolumle('lab', lab, !isveren);
   const biz = duz('biz');
   if (biz.length) sonuc.biz = bolumle('biz', biz, !isveren);
@@ -839,7 +844,7 @@ async function raporSayfasi(isveren) {
       <div class="kart-bas"><div><h2>${baslik}</h2><div class="aciklama">${aciklama}</div></div><div class="bosluk"></div>
         ${kopyaDugmesi(metin, 'dugme kucuk' + (sinif ? ' ' + sinif : ''), 'Kopyala')}</div>
       <div class="kart-ic"><pre class="rapor-metin">${esc(metin)}</pre></div></div>`;
-  const bos = !r.musteri.length && !r.lab && !r.biz && !r.sondaj && !r.kapanis;
+  const bos = !r.musteri.length && !r.lab && !r.biz && !r.sondaj && !r.kapanis && !r.taramaKisa;
   sayfaYaz(`
     <div class="ust">${isveren ? `<a class="geri" href="#/isler/${encodeURIComponent(isveren)}" title="İşlere dön">${ikon('geri')}</a>` : ''}
       <div><h1>${isveren ? esc(isverenAdi(isveren)) + ' raporu' : 'İşveren raporu'}</h1>
@@ -857,6 +862,7 @@ async function raporSayfasi(isveren) {
     ${r.sondaj ? bolumKart(`Sondaj <span class="etiket" style="margin-left:6px">${r.sondajSayi}</span>`, 'Sondajcıya verilmiş (ÖMERE ATILDI gibi) ama sondajı yapılmamış işler', r.sondaj) : ''}
     ${r.lab ? bolumKart(`Laboratuvar <span class="etiket vurgu" style="margin-left:6px">${r.labSayi}</span>`, 'Sondajı yapılmış, laba atılmış ama sonucu gelmemiş işler', r.lab) : ''}
     ${r.labKisa ? bolumKart(`Laboratuvara gönder <span class="etiket vurgu" style="margin-left:6px">${r.labSayi}</span>`, 'Yalnızca ada / parsel, kopyalayıp doğrudan laboratuvara gönderin', r.labKisa) : ''}
+    ${r.taramaKisa ? bolumKart(`Lab taraması istenecek <span class="etiket vurgu" style="margin-left:6px">${r.taramaSayi}</span>`, 'Lab sonucu gelmiş ama taraması gelmemiş işler; yalnızca ada / parsel, kopyalayıp laboratuvara gönderin', r.taramaKisa) : ''}
     ${r.biz ? bolumKart(`Bizde <span class="etiket turuncu" style="margin-left:6px">${r.bizSayi}</span>`, 'Sizin yapacaklarınız: zemin değeri, sondaj, laba gönderme', r.biz) : ''}
     ${r.kapanis ? bolumKart(`Kapanış <span class="etiket yesil" style="margin-left:6px">${r.kapanisSayi}</span>`, 'Lab sonucu gelmiş işler: rapor yazılacak, imza-CD, lab taraması gelecek / yapılacak', r.kapanis) : ''}`);
   kopyaBagla();
