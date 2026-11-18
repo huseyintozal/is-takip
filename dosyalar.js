@@ -136,7 +136,8 @@ async function klasorDogrula(i, zorla = false) {
     bildir(`Klasör taşınmış, yeni yeri bulundu: ${klasor}`);
     gorulduYaz([guncel.id]);
   } else if (r.durum === 'yerinde') gorulduYaz([guncel.id]);
-  else if (r.durum === 'yok' && gorulenler().has(guncel.id)) { DOSYA.kayip.add(guncel.id); klasor = ''; }
+  // bulunamadı: eski yerde yeni (boş) klasör açılmasın; OneDrive'da aynı işin iki klasörü oluşuyordu
+  else if (r.durum === 'yok') { DOSYA.kayip.add(guncel.id); klasor = ''; }
   DOSYA.dogrulandi.set(guncel.id, { klasor, zaman: Date.now() });
   return klasor;
 }
@@ -573,7 +574,7 @@ async function dosyalarSayfasi() {
       <div class="kart-ic yigin">${y ? `
         <div class="sistem-satir" style="padding:0"><div class="durum-ikon ok">${ikon('tamam')}</div>
           <div style="flex:1"><b>Dosya Yardımcısı çalışıyor</b><div class="soluk kucuk-yazi">Bilgisayar: ${esc(y.pc)} · sürüm ${esc(y.surum)}</div>
-          ${y.surum < '1.3.3' ? `<div class="kucuk-yazi" style="margin-top:4px"><b>Yeni sürüm var:</b> <a href="dosya_yardimcisi.zip" download>dosya_yardimcisi.zip</a>'i indirip içindeki KUR.bat'ı tekrar çalıştırın (açılan klasör ve dosyalar öne gelsin diye).</div>` : ''}</div></div>
+          ${y.surum < '1.3.4' ? `<div class="kucuk-yazi" style="margin-top:4px"><b>Yeni sürüm var:</b> <a href="dosya_yardimcisi.zip" download>dosya_yardimcisi.zip</a>'i indirip içindeki KUR.bat'ı tekrar çalıştırın (açılan klasör ve dosyalar öne gelsin diye).</div>` : ''}</div></div>
         <div class="alan"><label>Ana klasör (proje klasörlerinin bulunduğu yer)</label>
           <div style="display:flex;gap:8px;flex-wrap:wrap"><input class="girdi" id="kokYol" value="${esc(y.kok || '')}" placeholder="C:\\Users\\...\\ZEMİN ETÜT RAPORLARI" style="flex:1;min-width:260px">
           <button class="dugme" id="kokSec">${ikon('klasor')}Seç…</button><button class="dugme" id="kokKaydet">Kaydet</button></div>
@@ -591,7 +592,10 @@ async function dosyalarSayfasi() {
         <div style="flex:1"></div><button class="dugme ana" id="tara">${ikon('ara')}Klasörleri tara</button></div>
       <div class="kart-ic" id="eslesme"><div class="soluk kucuk-yazi">Taramak için düğmeye basın.</div></div></div>
     <div class="kart"><div class="kart-bas"><h2>Bu bilgisayarla eşitle</h2></div>
-      <div class="kart-ic yigin" id="esitle"><div class="soluk kucuk-yazi">Kontrol ediliyor…</div></div></div>` : ''}`}
+      <div class="kart-ic yigin" id="esitle"><div class="soluk kucuk-yazi">Kontrol ediliyor…</div></div></div>
+    <div class="kart"><div class="kart-bas"><h2>Çift klasörler</h2><span class="aciklama">Aynı işe ait birden çok klasör (taşınan klasör bulunamayınca eski yerde yenisi açılmış olabilir)</span>
+      <div style="flex:1"></div><button class="dugme" id="ciftAra">${ikon('ara')}Ara</button></div>
+      <div class="kart-ic yigin" id="ciftler"><div class="soluk kucuk-yazi">Aramak için düğmeye basın. Proje klasörleri ve OneDrive taranır, biraz sürebilir.</div></div></div>` : ''}`}
     </div>`);
   $('#bulutaYukle').onchange = e => { try { localStorage.setItem('isTakip.bulutaYukle', e.target.checked ? '1' : '0'); } catch (x) { /* */ } };
   if ($('#tekrarDene')) $('#tekrarDene').onclick = () => dosyalarSayfasi();
@@ -606,6 +610,7 @@ async function dosyalarSayfasi() {
   if ($('#yeniYer')) $('#yeniYer').onchange = e => { try { localStorage.setItem('isTakip.yeniKlasorYeri', e.target.value.trim()); } catch (x) { /* */ } };
   if ($('#tara')) $('#tara').onclick = taramaYap;
   if ($('#esitle')) esitlemeCiz();
+  if ($('#ciftAra')) $('#ciftAra').onclick = ciftleriCiz;
 }
 
 async function taramaYap() {
@@ -789,6 +794,38 @@ async function eksikleriBul() {
   const yalnizPc = pcdeki.filter((d, n) => pcSorgu[n].klasor && pcVar[n]);
   const kayip = pcdeki.filter((d, n) => !pcSorgu[n].klasor || !pcVar[n]);
   return { eksik, yalnizPc, kayip };
+}
+/* Aynı işin işaretini taşıyan birden çok klasörü bulur; seçilen klasörde toplar */
+async function ciftleriCiz() {
+  const kutu = $('#ciftler'); if (!kutu) return;
+  if (!DOSYA.yardimci || DOSYA.yardimci.surum < '1.3.4') { kutu.innerHTML = `<div class="kucuk-yazi">Bunun için Dosya Yardımcısı'nın yeni sürümü gerekiyor: <a href="dosya_yardimcisi.zip" download>dosya_yardimcisi.zip</a>'i indirip KUR.bat'ı çalıştırın.</div>`; return; }
+  kutu.innerHTML = '<div class="soluk kucuk-yazi">Klasörler taranıyor…</div>';
+  let ciftler;
+  try { ciftler = (await yardimci('/ciftler', { sure: 300000 })).ciftler; } catch (e) { kutu.innerHTML = ''; return hataGoster(e); }
+  ciftler = ciftler.filter(c => BULUT.isler.has(c.is_id));
+  if (!ciftler.length) { kutu.innerHTML = `<div class="sistem-satir" style="padding:0"><div class="durum-ikon ok">${ikon('tamam')}</div><b>Çift klasör yok</b></div>`; ikonlariDoldur(kutu); return; }
+  const tarih = t => t ? new Date(t).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+  kutu.innerHTML = `<div class="kucuk-yazi soluk">Her iş için dosyaların toplanacağı klasörde <b>Burada topla</b>'ya basın: öbür klasördeki dosyalar oraya taşınır (aynı dosya iki yerde varsa bir kez kalır),
+      boşalan klasör silinir; kopya dosyalar kalırsa ana klasördeki <b>_silinenler</b>'e konur. Hiçbir dosya kaybolmaz.</div>
+    ${ciftler.map((c, n) => { const i = BULUT.isler.get(c.is_id); return `<div class="cift-is">
+      <b><a href="${isHash(i)}">${esc(kimlik(i))}</a></b> <span class="soluk kucuk-yazi">${esc(i.isveren || '')}</span>
+      ${c.klasorler.map((k, m) => `<div class="cift-klasor"><div style="flex:1;min-width:0"><div class="kucuk-yazi" style="word-break:break-all">${ikon('klasor')} ${esc(k.yol)}</div>
+          <div class="kucuk-yazi soluk">${k.dosya} dosya · ${boyutYaz(k.boyut)} · son değişiklik ${esc(tarih(k.son))}${k.klasor === i.klasor ? ' · <span class="etiket yesil">programdaki</span>' : ''}</div></div>
+        <button class="dugme kucuk" data-cift="${n}" data-hedef="${m}">Burada topla</button></div>`).join('')}</div>`; }).join('')}`;
+  ikonlariDoldur(kutu);
+  $$('[data-cift]', kutu).forEach(b => b.onclick = async () => {
+    const c = ciftler[+b.dataset.cift], h = c.klasorler[+b.dataset.hedef], i = BULUT.isler.get(c.is_id);
+    const digerleri = c.klasorler.filter(k => k !== h);
+    if (!await onayla('Klasörler birleştirilsin mi?', `<b>${esc(kimlik(i))}</b>: ${digerleri.map(k => `<b>${esc(k.yol)}</b> (${k.dosya} dosya)`).join(', ')} içindeki dosyalar<br><b>${esc(h.yol)}</b><br>klasörüne taşınacak.`, 'Birleştir')) return;
+    try {
+      let tasinan = 0, atlanan = 0, son = h.klasor;
+      for (const k of digerleri) { const r = await yardimci('/birlestir', { json: { is_id: c.is_id, kaynak: k.yol, hedef: h.yol }, sure: 300000 }); tasinan += r.tasinan; atlanan += r.atlanan; son = r.klasor; }
+      if (son && son !== i.klasor) await api('PUT', `is_takip/isler/${encodeURIComponent(i.id)}`, { klasor: son });
+      DOSYA.kayip.delete(i.id); DOSYA.dogrulandi.delete(i.id);
+      bildir(`${kimlik(i)}: ${tasinan} dosya taşındı${atlanan ? `, ${atlanan} kopya dosya atlandı` : ''}`);
+      ciftleriCiz();
+    } catch (e) { hataGoster(e); }
+  });
 }
 async function esitlemeCiz() {
   const kutu = $('#esitle'); if (!kutu) return;

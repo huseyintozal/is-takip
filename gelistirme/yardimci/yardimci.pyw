@@ -22,7 +22,7 @@ from datetime import datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
-SURUM = '1.3.3'
+SURUM = '1.3.4'
 PORT = int(os.environ.get('IS_TAKIP_YARDIMCI_PORT', '8767'))
 AYAR_KL = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'IsTakibi')
 AYAR = os.path.join(AYAR_KL, 'yardimci.json')
@@ -98,12 +98,38 @@ def icinde(yol, taban):
     return yol == taban or yol.startswith(taban.rstrip(os.sep) + os.sep)
 
 
+def onedrive_kokleri():
+    """Bu bilgisayardaki OneDrive klasörleri (kişisel / iş)."""
+    yerler = []
+    for d in ('OneDrive', 'OneDriveConsumer', 'OneDriveCommercial'):
+        v = os.environ.get(d)
+        if v and os.path.isdir(v) and os.path.realpath(v) not in yerler:
+            yerler.append(os.path.realpath(v))
+    return yerler
+
+
+def onedrive_cevir(yol):
+    """Başka bilgisayarda seçilmiş OneDrive yolunu bu bilgisayarınkine çevirir:
+    C:\\Users\\ALİ\\OneDrive\\X\\Y -> C:\\Users\\PC\\OneDrive\\X\\Y (varsa). Yoksa ''."""
+    parca = [x for x in re.split(r'[\\/]+', str(yol or '')) if x]
+    for n, x in enumerate(parca):
+        if x.lower().startswith('onedrive'):
+            for k in onedrive_kokleri():
+                aday = os.path.join(k, *parca[n + 1:]) if parca[n + 1:] else k
+                if os.path.exists(aday):
+                    return os.path.realpath(aday)
+            break
+    return ''
+
+
 def tam_yol(klasor, ad=''):
     """İşin klasörü (göreli ya da pencereden seçilmiş mutlak yol) + dosya adı -> güvenli mutlak yol."""
     if not dis_mi(klasor):
         return guvenli_yol(goreli_klasor(klasor), guvenli_ad(ad) if ad else '')
     taban = os.path.realpath(os.path.normpath(str(klasor)))
-    izinli = [os.path.realpath(x) for x in ayar_oku().get('dis_klasorler', [])]
+    izinli = [os.path.realpath(x) for x in ayar_oku().get('dis_klasorler', [])] + onedrive_kokleri()
+    if not any(icinde(taban, i) for i in izinli) and onedrive_cevir(klasor):
+        taban = onedrive_cevir(klasor)            # başka bilgisayarın OneDrive yolu: buradaki karşılığı
     if not any(icinde(taban, i) for i in izinli):
         # başka bilgisayarda seçilmiş klasör: bu bilgisayarda ana klasörün içinde aynı adla kullanılır
         return guvenli_yol(guvenli_ad(re.split(r'[\\/]+', str(klasor).rstrip('\\/'))[-1]), guvenli_ad(ad) if ad else '')
@@ -181,6 +207,9 @@ def arama_kokleri():
     if kok():                                   # önce ana klasörde ara
         k = os.path.realpath(kok())
         sonuc.sort(key=lambda y: 0 if icinde(k, y) or icinde(y, k) else 1)
+    for o in onedrive_kokleri():                # bulunamazsa OneDrive'ın tamamında (klasör OneDrive içinde taşınmış olabilir)
+        if not any(icinde(o, s) for s in sonuc):
+            sonuc.append(o)
     return sonuc
 
 
@@ -194,6 +223,78 @@ def isaret_ara(is_id):
             if ISARET in dosyalar and isaret_oku(yol) == is_id:
                 return yol
     return None
+
+
+def isaretli_klasorler():
+    """Arama yerlerindeki bütün işaretli klasörler: {is_id: [yol, ...]}"""
+    bulunan = {}
+    for taban in arama_kokleri():
+        for yol, alt, dosyalar in os.walk(taban):
+            derinlik = 0 if yol == taban else os.path.relpath(yol, taban).count(os.sep) + 1
+            alt[:] = [a for a in alt if not a.startswith('.') and a.lower() not in ('$recycle.bin', 'system volume information', '_silinenler')]
+            if derinlik >= ARAMA_DERINLIK:
+                alt[:] = []
+            if ISARET in dosyalar:
+                is_id = isaret_oku(yol)
+                if is_id:
+                    r = os.path.realpath(yol)
+                    if r not in bulunan.setdefault(is_id, []):
+                        bulunan[is_id].append(r)
+    return bulunan
+
+
+def klasor_ozet(yol):
+    """Klasördeki (alt klasörler dahil) dosya sayısı, toplam boyut, son değişiklik."""
+    sayi = boyut = 0
+    son = 0
+    for y, alt, dosyalar in os.walk(yol):
+        alt[:] = [a for a in alt if a.lower() != '_silinenler']
+        for d in dosyalar:
+            if d == ISARET or d.lower() in ('thumbs.db', 'desktop.ini') or d.startswith('~$'):
+                continue
+            try:
+                st = os.stat(os.path.join(y, d))
+                sayi += 1; boyut += st.st_size; son = max(son, st.st_mtime)
+            except OSError:
+                pass
+    return {'dosya': sayi, 'boyut': boyut, 'son': datetime.fromtimestamp(son).isoformat(timespec='minutes') if son else ''}
+
+
+def birlestir(kaynak, hedef):
+    """kaynak klasördeki dosyaları hedefe taşır (aynı yerde aynı boyutta dosya varsa kopyası sayılır, taşınmaz).
+    Sonra kaynak boşaldıysa silinir; boşalmadıysa (kopyalar kaldıysa) ana klasördeki _silinenler'e taşınır."""
+    tasinan = atlanan = 0
+    for y, alt, dosyalar in os.walk(kaynak):
+        alt[:] = [a for a in alt if a.lower() != '_silinenler']
+        for d in dosyalar:
+            if d == ISARET:
+                continue
+            kay = os.path.join(y, d)
+            goreli = os.path.relpath(kay, kaynak)
+            hed = os.path.join(hedef, goreli)
+            try:
+                if os.path.isfile(hed) and os.path.getsize(hed) == os.path.getsize(kay):
+                    atlanan += 1
+                    continue
+                os.makedirs(os.path.dirname(hed), exist_ok=True)
+                os.replace(kay, benzersiz(hed))
+                tasinan += 1
+            except OSError:
+                gunluk('birleştir: taşınamadı', kay, traceback.format_exc())
+    # kalanlar: kopyalar ve işaret dosyası
+    kalan = [os.path.join(y, d) for y, _, ds in os.walk(kaynak) for d in ds if d != ISARET]
+    if not kalan:
+        import shutil
+        shutil.rmtree(kaynak, ignore_errors=True)
+    else:
+        try:
+            os.remove(os.path.join(kaynak, ISARET))
+        except OSError:
+            pass
+        cop = os.path.join(kok() or os.path.dirname(kaynak), '_silinenler')
+        os.makedirs(cop, exist_ok=True)
+        os.replace(kaynak, benzersiz(os.path.join(cop, os.path.basename(kaynak) + ' (kopya)')))
+    return {'tasinan': tasinan, 'atlanan': atlanan}
 
 
 def benzersiz(yol):
@@ -478,6 +579,25 @@ class Isleyici(BaseHTTPRequestHandler):
                     except Exception:
                         pass
                 return self._json(200, {'var': var})
+            if yol == '/ciftler':                           # aynı işe ait birden çok klasör (işaretinden)
+                sonuc = []
+                for is_id, yollar in isaretli_klasorler().items():
+                    if len(yollar) > 1:
+                        sonuc.append({'is_id': is_id, 'klasorler': [dict(klasor_ozet(y), yol=y, klasor=klasor_degeri(y)) for y in yollar]})
+                return self._json(200, {'ciftler': sonuc})
+            if yol == '/birlestir' and yontem == 'POST':    # {is_id, kaynak, hedef}: iki klasörü hedefte toplar
+                is_id = str(j.get('is_id') or '')
+                kay, hed = os.path.realpath(str(j.get('kaynak') or '')), os.path.realpath(str(j.get('hedef') or ''))
+                kokler = arama_kokleri()
+                for y in (kay, hed):
+                    if not is_id or not os.path.isdir(y) or isaret_oku(y) != is_id or not any(icinde(y, k) for k in kokler):
+                        return self._json(400, {'hata': 'Klasör bulunamadı ya da bu işe ait değil'})
+                if kay == hed or icinde(hed, kay) or icinde(kay, hed):
+                    return self._json(400, {'hata': 'Aynı klasör'})
+                with KILIT:
+                    r = birlestir(kay, hed)
+                gunluk('birleştir', kay, '->', hed, r)
+                return self._json(200, dict(r, klasor=klasor_degeri(hed)))
             if yol == '/bul' and yontem == 'POST':          # işin klasörü yerinde mi? değilse işaretinden bul
                 is_id = str(j.get('is_id') or '')
                 try:
