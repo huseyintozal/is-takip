@@ -59,6 +59,39 @@ const KIMDE = {
 /* Rapor, imza-CD ve lab taraması da bitince iş listeden çıkar, "Bitti" sekmesinde durur */
 const BITTI_KUTU = { ad: 'Bitti', renk: '', ikon: 'tamam' };
 
+/* İşin sondajcısı: elle yazılmışsa o; yoksa sondaj notundan tahmin ("ÖMERE ATILDI" → ÖMER, "AYGÜN ABİYLE YAPILACAK" → AYGÜN ABİ).
+ * Önce bilinen adlar (başka işlere yazılmış sondajcılar, mali takipteki sondajcılar) notta aranır. */
+function bilinenSondajcilar() {
+  const l = new Set((IT.isler || tumIsler()).map(i => (i.sondajci || '').trim().toLocaleUpperCase('tr')).filter(Boolean));
+  if (window.MALI && MALI.cariler) [...MALI.cariler.values()].filter(c => c.tur === 'sondaj').forEach(c => l.add(String(c.ad).trim().toLocaleUpperCase('tr')));
+  return [...l];
+}
+function nottanSondajci(not, bilinen) {
+  const k = katla(not);
+  if (!k) return '';
+  // kelime başında geçiyorsa (ÖMERE, ÖMER'E, ÖMER ABİ…) o kişidir
+  const bul = bilinen.filter(a => new RegExp('(^|[^A-Z0-9])' + katla(a).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(k));
+  if (bul.length) return bul.sort((a, b) => b.length - a.length)[0];
+  const w = String(not).toLocaleUpperCase('tr').replace(/[^\p{L}\s]/gu, ' ').split(/\s+/).filter(x => x && !/^SONDAJ/.test(x));
+  const fiil = w.findIndex(x => /^(ATIL|VERİL|VERDİ|YAPIL|YAPAC|YAPIY|YAPTI|GÖNDER|GİDE|GİTTİ|ALDI|ALACAK|BAŞLA)/.test(x));
+  const ad = fiil > 0 ? w.slice(0, fiil) : fiil < 0 && w.length <= 2 ? w : [];
+  if (!ad.length) return '';
+  if (fiil > 0) {          // yönelme / birliktelik eki: ÖMERE, MUSTAFAYA, ABİYLE
+    let s = ad[ad.length - 1]; const ilk = s;
+    s = s.replace(/(YLE|YLA|İLE|ILE)$/, '');
+    if (s === ilk) { if (/(YA|YE)$/.test(s) && s.length > 4) s = s.slice(0, -2); else if (/[^AEIİOÖUÜ][AE]$/.test(s) && s.length > 3) s = s.slice(0, -1); }
+    ad[ad.length - 1] = s;
+  }
+  while (ad.length > 1 && /^(ABİ|ABİM|BEY|USTA|HOCA)$/.test(ad[ad.length - 1])) ad.pop();     // ÖMER ABİ = ÖMER
+  return ad.join(' ');
+}
+function sondajciAdi(i, bilinen = bilinenSondajcilar()) {
+  if ((i.sondajci || '').trim()) return { ad: i.sondajci.trim().toLocaleUpperCase('tr'), tahmin: false };
+  const n = i.alan_notlari || {};
+  const ad = nottanSondajci([n.sondaj, n.sondaja_atildi].filter(Boolean).join(' '), bilinen);
+  return { ad, tahmin: !!ad };
+}
+
 /* Sondaj yapıldıysa (ya da sondajcıya verildiyse) bina yıkılmış demektir */
 const binaSondajdan = i => !!(i.sondaj || i.sondaja_atildi);
 const binaYikik = i => i.bina_yikildi === 'evet' || binaSondajdan(i);
@@ -258,7 +291,7 @@ async function isTakipAyrilirken() {           // kaydedilmemiş iş formu kaybo
 
 // ================================================================== işler listesi
 function suzgec() {
-  return Object.assign({ kimde: '', ara: '', gizle: true, sira: 'isveren' }, depoOku('suzgec', {}));
+  return Object.assign({ kimde: '', ara: '', gizle: true, sira: 'isveren', sondajci: '' }, depoOku('suzgec', {}));
 }
 async function islerSayfasi(isveren) {
   await islerYukle(true);
@@ -367,7 +400,22 @@ function tabloCiz(isveren) {
     if (SUZGECLER[s.kimde]) liste = liste.filter(x => SUZGECLER[s.kimde].f(x.i, x.d));
     else if (KIMDE[s.kimde]) liste = liste.filter(x => x.d.kimde.includes(s.kimde));
   }
-  if (q) liste = liste.filter(({ i }) => katla([i.mal_sahibi, i.mahalle, i.ada, i.parsel, `${i.ada}/${i.parsel}`, i.isveren, i.notlar, ...Object.values(i.alan_notlari || {})].join(' ')).includes(q));
+  if (q) liste = liste.filter(({ i }) => katla([i.mal_sahibi, i.mahalle, i.ada, i.parsel, `${i.ada}/${i.parsel}`, i.isveren, i.notlar, i.sondajci, ...Object.values(i.alan_notlari || {})].join(' ')).includes(q));
+  // sondaj süzgeçlerinde sondajcıya göre ayır
+  const sondajSuzgeci = ['sondaja', 'sondajyap'].includes(s.kimde);
+  const bilinen = bilinenSondajcilar();
+  liste.forEach(x => { x.sc = sondajciAdi(x.i, bilinen); });
+  let sondajCipler = '';
+  if (sondajSuzgeci) {
+    const say = {}; liste.forEach(x => { const k = x.sc.ad || ''; say[k] = (say[k] || 0) + 1; });
+    const adlar = Object.keys(say).filter(Boolean).sort(trSirala);
+    if (s.sondajci && !(s.sondajci in say)) s.sondajci = '';
+    sondajCipler = `<div class="cipler sondajci-cipler"><span class="soluk kucuk-yazi">Sondajcı:</span>
+      <button class="cip ${!s.sondajci ? 'secili' : ''}" data-sondajci="">Hepsi <b>${liste.length}</b></button>
+      ${adlar.map(a => `<button class="cip ${s.sondajci === a ? 'secili' : ''}" data-sondajci="${esc(a)}">${esc(a)} <b>${say[a]}</b></button>`).join('')}
+      ${say[''] ? `<button class="cip ${s.sondajci === '-' ? 'secili' : ''}" data-sondajci="-">Belirtilmemiş <b>${say['']}</b></button>` : ''}</div>`;
+    if (s.sondajci) liste = liste.filter(x => s.sondajci === '-' ? !x.sc.ad : x.sc.ad === s.sondajci);
+  }
   const ap = i => [parseInt(i.ada) || 0, parseInt(i.parsel) || 0];
   const sira = {
     isveren: (a, b) => trSirala(ik(a.i.isveren), ik(b.i.isveren)) || a.d.asama.sira - b.d.asama.sira || trSirala(a.i.mal_sahibi || '~', b.i.mal_sahibi || '~'),
@@ -381,11 +429,11 @@ function tabloCiz(isveren) {
     kutu.innerHTML = `<div class="tablo-bos">${IT.isler.length ? 'Bu süzgece uyan iş yok.' : 'Henüz iş yok. <a href="#/is/yeni">Yeni iş ekleyin</a> ya da <a href="#/isler/aktar">Excel\'den aktarın</a>.'}</div>`;
     return;
   }
-  kutu.innerHTML = `<table class="veri isler"><thead><tr>
+  kutu.innerHTML = sondajCipler + `<table class="veri isler"><thead><tr>
       <th>Mal sahibi</th><th>Ada/Parsel</th>${isveren ? '' : '<th>İşveren</th>'}
       ${SUTUNLAR.map(a => `<th class="o" title="${esc(ALAN[a].ad)}">${esc(ALAN[a].kisa)}</th>`).join('')}
       <th>Durum</th></tr></thead><tbody>
-    ${liste.map(({ i, d }) => {
+    ${liste.map(({ i, d, sc }) => {
       const m = isMesajlari(i, d);
       return `<tr data-id="${esc(i.id)}" class="${d.bitti ? 'tamam' : ''}">
         <td class="h-ms"><div class="ms">${esc(i.mal_sahibi || '—')}</div><div class="ms-alt">${esc(i.mahalle || '')}${istemci().dosyaRozeti ? istemci().dosyaRozeti(i) : ''}</div>${notSatirlari(i)}</td>
@@ -393,9 +441,11 @@ function tabloCiz(isveren) {
         ${isveren ? '' : `<td class="kucuk-yazi h-isv">${esc(i.isveren)}</td>`}
         ${SUTUNLAR.map(a => `<td class="o" data-k="${esc(ALAN[a].kisa)}">${hucre(i, a, d)}</td>`).join('')}
         <td class="h-durum"><span class="etiket ${d.asama.renk}">${esc(d.asama.ad)}</span>
+          ${(i.sondaj || i.sondaja_atildi) && sc.ad ? `<div class="sonraki" title="${sc.tahmin ? 'Sondaj notundan tahmin' : 'Sondajcı'}">${ikon('saat').replace('<i ', '<i style="width:12px;height:12px" ')}${esc(sc.ad)}${sc.tahmin ? ' ?' : ''}</div>` : ''}
           ${m.length > 1 ? `<div class="sonraki">${m.length} bekleyen adım</div>` : ''}</td></tr>`;
     }).join('')}</tbody></table>`;
   ikonlariDoldur(kutu);
+  $$('[data-sondajci]', kutu).forEach(b => b.onclick = () => { depoYaz('suzgec', Object.assign(suzgec(), { sondajci: b.dataset.sondajci })); tabloCiz(isveren); });
   $$('tr[data-id]', kutu).forEach(tr => tr.onclick = async e => {
     const b = e.target.closest('[data-dd]');
     const is_ = IT.isler.find(x => x.id === tr.dataset.id);
@@ -663,7 +713,15 @@ function durumlariCiz() {
       <input class="girdi alan-not" data-not="${a}" value="${esc((f.alan_notlari || {})[a] || '')}" placeholder="Not yaz (örn. ${esc(t.ornek || 'İYİLEŞTİRME ÇIKABİLİR')})">
       <div class="secenekler">${secenek}</div></div>`;
   };
-  $('#durumlar').innerHTML = ['mimari', 'evrak', 'zemin_degeri', 'geo', 'bina_yikildi', 'sondaj', 'laba_atildi', 'lab', 'riskli_rapor', ...BITIS_ALANLARI].map(satir).join('');
+  // sondaja atıldıysa / yapıldıysa: kime verildiği
+  const sc = sondajciAdi(f);
+  const sondajciSatir = f.sondaj || f.sondaja_atildi ? `<div class="durum-satir"><div><b>Sondajcı</b><span>Sondaj kime verildi?</span></div>
+      <input class="girdi alan-not" id="sondajciGir" list="dlSondajci" value="${esc(f.sondajci || '')}" placeholder="${sc.ad ? esc(sc.ad) + ' (nottan tahmin)' : 'örn. ÖMER'}">
+      <div class="secenekler kucuk-yazi soluk">${sc.tahmin ? 'Boş bırakılırsa nottan: ' + esc(sc.ad) : ''}</div></div>
+      <datalist id="dlSondajci">${bilinenSondajcilar().sort(trSirala).map(a => `<option value="${esc(a)}">`).join('')}</datalist>` : '';
+  $('#durumlar').innerHTML = ['mimari', 'evrak', 'zemin_degeri', 'geo', 'bina_yikildi', 'sondaj', 'laba_atildi', 'lab', 'riskli_rapor', ...BITIS_ALANLARI]
+    .map(a => satir(a) + (a === 'sondaj' ? sondajciSatir : '')).join('');
+  if ($('#sondajciGir')) $('#sondajciGir').oninput = e => { if (IT.form !== f) return; f.sondajci = e.target.value.toLocaleUpperCase('tr'); IT.degisti = true; };
   ikonlariDoldur($('#durumlar'));
   $$('#durumlar [data-not]').forEach(g => g.oninput = () => {
     if (IT.form !== f) return;
@@ -745,7 +803,7 @@ async function isKaydet(sessiz = false, yeniyeGec = false) {
   if (!String(f.isveren || '').trim()) { bildir('İşveren adını yazın', 'hata'); $('[data-a="isveren"]').focus(); return; }
   if (!f.mal_sahibi && !f.parsel) { bildir('Mal sahibi ya da parsel girin', 'hata'); return; }
   const govde = {};
-  ['proje_id', 'firma_id', 'isveren', 'mahalle', 'mal_sahibi', 'ada', 'parsel', 'notlar', 'bina_yikildi', 'alan_notlari', 'bos_alanlar', ...DURUM_ALANLARI].forEach(a => { govde[a] = f[a]; });
+  ['proje_id', 'firma_id', 'isveren', 'mahalle', 'mal_sahibi', 'ada', 'parsel', 'notlar', 'sondajci', 'bina_yikildi', 'alan_notlari', 'bos_alanlar', ...DURUM_ALANLARI].forEach(a => { govde[a] = f[a]; });
   try {
     const g = f.id ? await api('PUT', `is_takip/isler/${encodeURIComponent(f.id)}`, govde) : await api('POST', 'is_takip/isler', govde);
     IT.degisti = false; IT.isler = null;

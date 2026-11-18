@@ -142,3 +142,6 @@ table.isler .ms-not b { font-weight: 600; }
 .ara-bos { padding: 18px 12px; color: var(--soluk); text-align: center; font-size: 13px; }
 .ara-alt { padding: 8px 16px; border-top: 1px solid var(--cizgi2); font-size: 12px; color: var(--soluk); background: var(--yuzey2); }
 .menu a .kisayol { margin-left: auto; font-size: 11px; color: #8aa0b8; border: 1px solid rgba(255,255,255,.14); border-radius: 5px; padding: 0 5px; }
+
+/* sondaj süzgecinde sondajcı çipleri */
+.sondajci-cipler { padding: 10px 16px; margin: 0; align-items: center; border-bottom: 1px solid var(--cizgi); }

@@ -105,7 +105,7 @@ function varsayilanTedarikci(tur) {
 function nottanTedarikci(i, tur) {
   const l = carilerTur(tur); if (!l.length) return null;
   const n = i.alan_notlari || {};
-  const metin = katla((tur === 'sondaj' ? [n.sondaj, n.sondaja_atildi] : [n.laba_atildi, n.lab]).filter(Boolean).join(' '));
+  const metin = katla((tur === 'sondaj' ? [i.sondajci, n.sondaj, n.sondaja_atildi] : [n.laba_atildi, n.lab]).filter(Boolean).join(' '));
   if (!metin) return null;
   const bul = l.filter(c => { const ad = katla(c.ad).trim(); return ad && new RegExp('(^|[^A-Z0-9])' + ad.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(metin); });
   return bul.length === 1 ? bul[0] : null;

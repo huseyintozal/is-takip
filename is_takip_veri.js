@@ -7,7 +7,7 @@
  *   isGoc(i)                    -> eski kayıtları yeni alanlara tamamlar */
 
 const VERI_DURUM = ['mimari', 'evrak', 'zemin_degeri', 'geo', 'sondaj', 'sondaja_atildi', 'laba_atildi', 'lab', 'riskli_rapor', 'rapor_yazildi', 'imza_cd', 'tarama_geldi', 'lab_taramasi'];
-const VERI_METIN = ['proje_id', 'firma_id', 'isveren', 'mahalle', 'mal_sahibi', 'ada', 'parsel', 'notlar', 'klasor'];   // klasor: bilgisayardaki proje klasörü
+const VERI_METIN = ['proje_id', 'firma_id', 'isveren', 'mahalle', 'mal_sahibi', 'ada', 'parsel', 'notlar', 'klasor', 'sondajci'];   // sondajci: sondajın verildiği kişi   // klasor: bilgisayardaki proje klasörü
 const VERI_ALAN_ADI = {
   mimari: 'Mimari', evrak: 'Evrak', zemin_degeri: 'Zemin değeri', geo: 'Geo', sondaj: 'Sondaj', sondaja_atildi: 'Sondaja atıldı',
   laba_atildi: 'Laba atıldı', lab: 'Lab sonucu', riskli_rapor: 'Riskli rapor', bina_yikildi: 'Bina yıkıldı',
