@@ -402,7 +402,7 @@ function tabloCiz(isveren) {
   }
   if (q) liste = liste.filter(({ i }) => katla([i.mal_sahibi, i.mahalle, i.ada, i.parsel, `${i.ada}/${i.parsel}`, i.isveren, i.notlar, i.sondajci, ...Object.values(i.alan_notlari || {})].join(' ')).includes(q));
   // sondaj süzgeçlerinde sondajcıya göre ayır
-  const sondajSuzgeci = ['sondaja', 'sondajyap'].includes(s.kimde);
+  const sondajSuzgeci = ['sondaja', 'sondajyap', 'sondaj'].includes(s.kimde);
   const bilinen = bilinenSondajcilar();
   liste.forEach(x => { x.sc = sondajciAdi(x.i, bilinen); });
   let sondajCipler = '';
