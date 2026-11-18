@@ -174,6 +174,9 @@ async function isUcretKaydet(isId, alanlar) {
   const { data, error } = await BULUT.sb.from('is_ucretleri').upsert(satir, { onConflict: 'is_id' }).select().single();
   if (error) throw sbHata(error);
   MALI.ucretler.set(isId, data);
+  // sondajcı seçildiyse işin "Sondajcı" alanına da yaz (mali takibi görmeyenler de görsün)
+  const c = alanlar.sondajci_id && MALI.cariler.get(alanlar.sondajci_id);
+  if (c && BULUT.isler.has(isId)) await api('PUT', `is_takip/isler/${encodeURIComponent(isId)}`, { sondajci: String(c.ad).trim().toLocaleUpperCase('tr') }).catch(() => {});
   return data;
 }
 async function cariGuncelle(id, alanlar) {
@@ -895,8 +898,20 @@ window.maliOturum = async () => {
   $$('[data-yonetici]').forEach(a => { a.style.display = maliYetki() ? '' : 'none'; });
   if (!maliYetki()) return;
   await maliIndir();
-  if (!MALI.kurulumYok) maliCanliBaslat();
+  if (!MALI.kurulumYok) { maliCanliBaslat(); sondajciEsitle(); }
 };
+/* Mali takipte işe seçilen sondajcı, işin "Sondajcı" alanına da yazılır: mali takibi görmeyen çalışanlar da görsün */
+async function sondajciEsitle() {
+  if (saltOkunur() || MALI.sondajciEsitleniyor) return;
+  MALI.sondajciEsitleniyor = true;
+  try {
+    for (const i of tumIsler()) {
+      if (!(i.sondaj || i.sondaja_atildi) || (i.sondajci || '').trim()) continue;
+      const u = MALI.ucretler.get(i.id), c = u && u.sondajci_id && MALI.cariler.get(u.sondajci_id);
+      if (c) await api('PUT', `is_takip/isler/${encodeURIComponent(i.id)}`, { sondajci: String(c.ad).trim().toLocaleUpperCase('tr') }).catch(() => {});
+    }
+  } finally { MALI.sondajciEsitleniyor = false; }
+}
 (() => {
   const onceki = window.ISTEMCI.isSayfasiSonra;
   window.ISTEMCI.isSayfasiSonra = (kayit, yeni) => {

@@ -63,7 +63,7 @@ const BITTI_KUTU = { ad: 'Bitti', renk: '', ikon: 'tamam' };
  * Önce bilinen adlar (başka işlere yazılmış sondajcılar, mali takipteki sondajcılar) notta aranır. */
 function bilinenSondajcilar() {
   const l = new Set((IT.isler || tumIsler()).map(i => (i.sondajci || '').trim().toLocaleUpperCase('tr')).filter(Boolean));
-  if (window.MALI && MALI.cariler) [...MALI.cariler.values()].filter(c => c.tur === 'sondaj').forEach(c => l.add(String(c.ad).trim().toLocaleUpperCase('tr')));
+  if (typeof MALI !== 'undefined' && MALI.yuklu) [...MALI.cariler.values()].filter(c => c.tur === 'sondaj').forEach(c => l.add(String(c.ad).trim().toLocaleUpperCase('tr')));
   return [...l];
 }
 function nottanSondajci(not, bilinen) {
@@ -87,6 +87,11 @@ function nottanSondajci(not, bilinen) {
 }
 function sondajciAdi(i, bilinen = bilinenSondajcilar()) {
   if ((i.sondajci || '').trim()) return { ad: i.sondajci.trim().toLocaleUpperCase('tr'), tahmin: false };
+  // mali takipte işe seçilmiş sondajcı (yalnızca yönetici yükler)
+  if (typeof MALI !== 'undefined' && MALI.yuklu) {
+    const u = MALI.ucretler.get(i.id), c = u && u.sondajci_id && MALI.cariler.get(u.sondajci_id);
+    if (c) return { ad: String(c.ad).trim().toLocaleUpperCase('tr'), tahmin: false };
+  }
   const n = i.alan_notlari || {};
   const ad = nottanSondajci([n.sondaj, n.sondaja_atildi].filter(Boolean).join(' '), bilinen);
   return { ad, tahmin: !!ad };
